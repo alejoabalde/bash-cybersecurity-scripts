@@ -16,8 +16,11 @@ remote_target="$remote_username@$remote_host"
 
 # Function to handle the wake up
 wakeup() {
+    echo "Sending wake-up packet to $remote_host ($remote_mac)..."
     if wol -i "$subnet_broadcast" "$remote_mac"; then
-	echo "Waiting for Host: $remote_host ($remote_ip) to wake up."
+        echo "Wake packet sent. Waiting for host to come online..."
+        sleep 5
+        return 0
 else
 	echo "Failed to send wake packet. Check if 'wol' is installed."
 	return 1
@@ -144,8 +147,8 @@ run_rsync() {
     flags=$1
     
     echo "Starting Syncing process..."
-    rsync $flags -e "ssh -p $ssh_port" "$local_src" "$remote_target:$mount_path/$remote_dest" 
-
+    rsync $flags -e "ssh -p $ssh_port -i $ssh_pubkey" "$local_src" "$remote_target:$mount_path/$remote_dest"
+    
     if [[ $? -eq 0 ]]; then
         echo "Success: Sync is now completed."
         return 0
@@ -159,31 +162,52 @@ run_rsync() {
 # Function to handle cleanup
 cleanup() {
 	echo -e "\nUnmounting $mapper_name ($remote_dev) at $mount_path."
-    ssh -p "$ssh_port" -i "$ssh_pubkey" "$remote_target" "sudo umount $mount_path; sudo cryptsetup luksClose $mapper_name"
+    if ssh -p "$ssh_port" -i "$ssh_pubkey" "$remote_target" "sudo umount $mount_path"; then
+        echo "Success: Unmounted $mount_path"
+    else
+        echo "Warning: Failed to unmount $mount_path (may not be mounted)"
+    fi
 
-    if [[ $? -eq 0 ]]; then
-        echo "Success: ($remote_dev) unmounted without errors."
+    if ssh -p "$ssh_port" -i "$ssh_pubkey" "$remote_target" "sudo cryptsetup luksClose $mapper_name"; then
+        echo "Success: Closed encrypted device $mapper_name"
         return 0
     else
-        echo "Failure: Unable to unmount ($remote_dev)"
+        echo "Warning: Failed to close $mapper_name (may not be open)"
         return 1
     fi
 }
 
 
 ### ------ Stage 0: Set up the variables ------- ###
-required_fields=("remote_host" "remote_ip" "remote_mac" "subnet_broadcast" "remote_username" "ssh_pubkey" "ssh_port" "mapper_name" "mount_path" "keyfile" "local_src" "remote_dest" "remote_dev")
+
+# Validate fields necessary for stage 1
+required_fields=("remote_host" "remote_ip" "remote_mac" "subnet_broadcast" "remote_username" "ssh_pubkey" "ssh_port" "mapper_name" "mount_path" "keyfile" "remote_dev")
 
 for field in "${required_fields[@]}"; do
     while [[ -z "${!field}" ]]; do
-        read -e -r -p "Required field $field is empty. Please choose a value: " "$field"
-        
+        read -e -r -p "Required field $field is empty. Please choose a value: " "$field" 
+
         if [[ -z "${!field}" ]]; then
             echo "Error: $field cannot be empty."
             fi
         done
     done
 
+# Expand tilde in paths
+ssh_pubkey="${ssh_pubkey/#\~/$HOME}"
+keyfile="${keyfile/#\~/$HOME}"
+
+# Validate specific fields
+if [[ ! -f "$ssh_pubkey" ]]; then
+    echo "Error: SSH public key '$ssh_pubkey' not found."
+    exit 1
+fi
+
+if ! [[ "$ssh_port" =~ ^[0-9]+$ ]]; then
+    echo "Error: SSH port must be a number."
+    exit 1
+fi
+    
 ###------ Stage 1: Setting the stage up ------###
 
 # Wake up the Host	
@@ -224,9 +248,12 @@ if ! decrypt; then
 		exit 1
 fi
 
+# Trap to ensure cleanup happens even if script is interrupted
+trap cleanup EXIT INT TERM
+
 # Mount the drive
 if ! mount_drive; then
-    echo "Failure: Mount was unsuccessful."
+    echo "Failure: Could not mount $mapper_name at $mount_path on $remote_host."
     exit 1
 fi
 
@@ -238,9 +265,19 @@ fi
 
 while true; do
     echo -e "\n--- Transfer Configuration ---"
-    read -e -r -p "Please select a local source to backup: " local_src
+
+    # Nested loop for local_src validation
+    while true; do
+        read -e -r -p "Please select a local source to backup: " local_src
+        if [[ -e "$local_src" ]]; then
+            break
+        else
+            echo "Error: '$local_src' does not exist. Please try again."
+        fi
+done
+
     read -e -r -p "Please select the remote destination: " remote_dest
-    
+
     rsync_menu
     confirm_and_run "$flags"
 
@@ -249,9 +286,9 @@ while true; do
         break
     fi
     
-    read -r -p "Do you wish to sync another directory? (y/N)" keep_syncing
+    read -r -p "Do you wish to sync another directory? (y/N) " keep_syncing
     case "$keep_syncing" in
-        [yY][eE][sS]|[yY]) true;;
+        [yY][eE][sS]|[yY]) continue;;
         [nN][oO]) echo "Exiting Syncing..." break;;
     esac
 done
