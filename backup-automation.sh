@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# --- Configuration --- #
+### ------ Configuration ------ ###
 remote_host=""
 remote_ip=""
 remote_mac=""
@@ -8,13 +8,11 @@ subnet_broadcast=""
 remote_username=""
 ssh_pubkey=""
 ssh_port=""
-remote_target="$remote_username@$remote_host"
 remote_dev=""
 mapper_name=""
 mount_path=""
 keyfile=""
-
-# --- Configuration --- #
+remote_target="$remote_username@$remote_host"
 
 # Function to handle the wake up
 wakeup() {
@@ -24,7 +22,6 @@ else
 	echo "Failed to send wake packet. Check if 'wol' is installed."
 	return 1
 	fi
-
 }
 
 # Function to check if remote host is online
@@ -34,22 +31,17 @@ ping_host() {
 	sleep 1 
 done
 
-if [[ $? -eq 0 ]]; then
-    echo -e "\nSuccess: $remote_host is now online."
-else
-    echo "Host failed to innitialize."
-    return 1
-fi
+echo -e "\nSuccess: $remote_host is now online."
 }
 
 # Function to ssh-in remote host
 ssh_in() {
     echo "Connecting to $remote_host ($remote_ip) over SSH"
-    ssh -i "$ssh_pubkey" "$remote_host"@"$remote_username" -p "$ssh_port" -t
+    ssh -i "$ssh_pubkey" "$remote_username"@"$remote_host" -p "$ssh_port" -t
     if [[ $? -eq 0 ]]; then
         echo "Success: dropping into shell."
     else
-        echo "Failure: Connection to host was unsuccessfull. Check your settings and try again."
+        echo "Failure: Connection to host was unsuccessful. Check your settings and try again."
         return 1
     fi
 }
@@ -57,7 +49,7 @@ ssh_in() {
 # Function to check remote sudo permissions
 check_remote_sudo() {
     echo "Checking sudo permissions on $remote_host..."
-    if ssh -t -p "$ssh_port" "$remote_username@$remote_host" "sudo -v"; then
+    if ssh -t -p "$ssh_port" -i "$ssh_pubkey" "$remote_username@$remote_host" "sudo -v"; then
         echo "Success: $remote_username has sudo permissions."
         return 0
     else
@@ -69,12 +61,12 @@ check_remote_sudo() {
 # Function to decrypt drive
 decrypt() {
 	echo "Decrypting drive: $mapper_name"
-	cat "$keyfile" | ssh -p "$ssh_port" "$remote_target" "sudo cryptsetup luksOpen $remote_dev $mapper_name --key-file=-"
+    ssh -p "$ssh_port" -i "$ssh_pubkey" "$remote_target" "sudo cryptsetup luksOpen $remote_dev $mapper_name --key-file=-" < "$keyfile"
     if [[ $? -eq 0 ]]; then
         echo "Success: $mapper_name mounted successfully."
         return 0
     else
-        echo "Failed to decripy $mapper_name. Check your Keyfile or mount point are correct."
+        echo "Failed to decrypt $mapper_name. Check your Keyfile or mount point are correct."
         return 1
     fi
 }
@@ -82,7 +74,7 @@ decrypt() {
 # Function to mount drive
 mount_drive() {
     echo "Attempting to mount device."
-    if ssh -t -p "$ssh_port" $remote_target "sudo mount /dev/mapper/$mapper_name $mount_path"; then
+    if ssh -t -p "$ssh_port" -i "$ssh_pubkey" "$remote_target" "sudo mount /dev/mapper/$mapper_name $mount_path"; then
     echo "Success: Drive $mapper_name mounted at $mount_path."
     return 0
 else
@@ -93,7 +85,7 @@ else
 
 # Function to handle rsync flags
 rsync_menu() {
-    local PS3="Please select yout rsync configuration: "
+    local PS3="Please select your rsync configuration: "
     local options=("LAN Fast Mirror (Default)" "WAN Slow Mirror" "Paranoid Mirror" "Test Run")
 
     select opt in "${options[@]}"
@@ -111,7 +103,7 @@ rsync_menu() {
         ;;
     "Paranoid Mirror")
         # Very paranoid versioned-like mirror (using --link-dest trick separately)
-        flags="aHXX --numeric-ids --delete --delete-after --link-dest=../backup-previous --info=progress2 --log-file=./rsync-backup.log" 
+        flags="-aHXX --numeric-ids --delete --delete-after --link-dest=../backup-previous --info=progress2 --log-file=./rsync-backup.log" 
         break
         ;;
         "Test Run")
@@ -126,7 +118,7 @@ done
 
 # Function to confirm before running
 confirm_and_run() {
-    local flags=$1
+    flags=$1
     
     echo "--- FINAL CONFIRMATION ---"
     echo "Source:      $local_src"
@@ -138,7 +130,7 @@ confirm_and_run() {
     
     case "$confirm" in
         [yY][eE][sS]|[yY]) 
-            run_sync "$flags"
+            run_rsync "$flags"
             ;;
         *)
             echo "Sync cancelled by user."
@@ -149,11 +141,10 @@ confirm_and_run() {
 
 # Function to start rsync
 run_rsync() {
-    local flags=$1
-    local ssh_sync="ssh -p $ssh_port $local_src $remote_target:$mount_path/$remote_dest"
+    flags=$1
     
     echo "Starting Syncing process..."
-    rsync $flags -e $ssh_sync
+    rsync $flags -e "ssh -p $ssh_port" "$local_src" "$remote_target:$mount_path/$remote_dest" 
 
     if [[ $? -eq 0 ]]; then
         echo "Success: Sync is now completed."
@@ -168,16 +159,24 @@ run_rsync() {
 # Function to handle cleanup
 cleanup() {
 	echo -e "\nUnmounting $mapper_name ($remote_dev) at $mount_path."
-    ssh -p $ssh_port $remote_target "sudo umount $mount_path; sudo cryptsetup luksClose $mapper_name"
+    ssh -p "$ssh_port" -i "$ssh_pubkey" "$remote_target" "sudo umount $mount_path; sudo cryptsetup luksClose $mapper_name"
+
+    if [[ $? -eq 0 ]]; then
+        echo "Success: ($remote_dev) unmounted without errors."
+        return 0
+    else
+        echo "Failure: Unable to unmount ($remote_dev)"
+        return 1
+    fi
 }
 
 
 ### ------ Stage 0: Set up the variables ------- ###
-required_fields=("remote_host" "remote_ip" "remote_mac" "subnet_broadcast" "remote_username" "ssh_pubkey" "ssh_port" "remote_dev" "mapper_name" "mount_path" "keyfile" "local_src" "remote_dev")
+required_fields=("remote_host" "remote_ip" "remote_mac" "subnet_broadcast" "remote_username" "ssh_pubkey" "ssh_port" "mapper_name" "mount_path" "keyfile" "local_src" "remote_dest" "remote_dev")
 
 for field in "${required_fields[@]}"; do
     while [[ -z "${!field}" ]]; do
-        read -r -p "Required field $field is empty. Please choose a value: " "$field"
+        read -e -r -p "Required field $field is empty. Please choose a value: " "$field"
         
         if [[ -z "${!field}" ]]; then
             echo "Error: $field cannot be empty."
@@ -194,12 +193,12 @@ if ! wakeup; then
 fi
 # Check if the host is online
 if ! ping_host; then
-    echo "Failure: Host seems to be offile."
+    echo "Failure: Host seems to be offline."
 exit 1
 fi
 
 # check SSH connection
-if ssh_in &>/dev/null; then
+if ssh -p "$ssh_port" -i "$ssh_pubkey" "$remote_username@$remote_host" "exit 0" &>/dev/null; then
     echo "Success: Connection to $remote_target is possible."
 else
     echo "Failure: Unable to SSH into host. Check your settings and try again"
@@ -207,7 +206,7 @@ else
 fi
 
 # Check remote user sudo permissions
-if ! check_remote_sudo "backup-server" "admin"; then
+if ! check_remote_sudo ; then
     echo "Failure: Cannot proceed without remote sudo privileges."
     exit 1
 fi
@@ -227,7 +226,7 @@ fi
 
 # Mount the drive
 if ! mount_drive; then
-    echo "Failure: Mount was unsuccessfull."
+    echo "Failure: Mount was unsuccessful."
     exit 1
 fi
 
@@ -239,13 +238,11 @@ fi
 
 while true; do
     echo -e "\n--- Transfer Configuration ---"
-    read -r -p "Please select a local source to backup: " local_src
-    read -r -p "Please select the remote destination: " remote_dest
+    read -e -r -p "Please select a local source to backup: " local_src
+    read -e -r -p "Please select the remote destination: " remote_dest
     
     rsync_menu
-    confirm_and_run
-    echo -e "\n --- Starting Syncing ---"
-    run_rsync
+    confirm_and_run "$flags"
 
     if [[ $? -ne 0 ]]; then
         echo "Failure: Unable to complete Sync."
@@ -254,7 +251,7 @@ while true; do
     
     read -r -p "Do you wish to sync another directory? (y/N)" keep_syncing
     case "$keep_syncing" in
-        [Yy][eE][sS]) true;;
+        [yY][eE][sS]|[yY]) true;;
         [nN][oO]) echo "Exiting Syncing..." break;;
     esac
 done
