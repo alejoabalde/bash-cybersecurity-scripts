@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # Constants and configurable settings
-MAX_PING_ATTEMPTS=180
+MAX_PING_ATTEMPTS=90
 SSH_CONNECT_TIMEOUT=10
 SSH_OPTIONS_BASE="-o ConnectTimeout=$SSH_CONNECT_TIMEOUT -o BatchMode=yes"
 LOG_TIMESTAMP_FORMAT="%Y%m%d-%H%M%S"
@@ -140,32 +140,39 @@ sanitize_path() {
 
 rsync_menu() {
     local PS3="Select rsync profile: "
-    local options=("LAN Fast Mirror (Default)" "WAN Slow Mirror" "Paranoid Mirror" "Test Run" "Quit")
-    local flags=
+    local options=("LAN Fast Mirror (Default)" "WAN Slow Mirror" "Paranoid Mirror" "Timeshift Snapshot Mirror" "Test Run" "Quit")
 
     while true; do
         select opt in "${options[@]}"; do
             case $opt in
                 "LAN Fast Mirror (Default)")
                     flags="-aHXX --numeric-ids --delete --delete-excluded --inplace "
+                    flags+="--copy-links "
                     flags+="--info=progress2 --stats --log-file=./rsync-backup-$(date +"$LOG_TIMESTAMP_FORMAT").log"
                     return 0
                     ;;
                 "WAN Slow Mirror")
                     flags="-aHXX --numeric-ids --inplace --partial --partial-dir=.rsync-partial "
+                    flags+="--copy-links "
                     flags+="--timeout=600 --info=progress2 --stats --log-file=./rsync-backup-$(date +"$LOG_TIMESTAMP_FORMAT").log"
                     return 0
                     ;;
                 "Paranoid Mirror")
                     flags="-aHXX --numeric-ids --delete --delete-after --info=progress2 "
+                    flags+="--copy-links "
                     flags+="--log-file=./rsync-backup-$(date +"$LOG_TIMESTAMP_FORMAT").log"
                     return 0
                     ;;
-                "Test Run")
-                    flags="-ah --delete --dry-run --itemize-changes --verbose --stats"
+                "Timeshift Snapshot Mirror")
+                    flags="-aHAX --numeric-ids --copy-links --info=progress2 --stats "
+                    flags+="--log-file=./rsync-timeshift-$(date +"$LOG_TIMESTAMP_FORMAT").log"
                     return 0
                     ;;
-                "Quit")
+                "Test Run")
+                    flags="-ah --delete --dry-run --itemize-changes --info=progress2,stats"
+                    return 0
+                    ;;
+                   "Quit")
                     return 1
                     ;;
                 *) echo "Invalid choice $REPLY";;
@@ -197,8 +204,13 @@ run_rsync() {
     local ssh_rsync="ssh -p $port"
     [[ -n "$key" ]] && ssh_rsync="$ssh_rsync -i $key"
 
+    local extra=()
+    if [[ "$flags" == *"timeshift"* ]]; then
+        extra+=(--rsync-path="sudo rsync")
+    fi
+
     echo "Starting rsync..."
-    if rsync $flags -e "$ssh_rsync" "$src" "$target:$mpath/$rdest"; then
+    if rsync "${extra[@]}" $flags -e "$ssh_rsync" "$src" "$target:$mpath/$rdest"; then
         echo "Sync completed successfully."
         return 0
     else
@@ -222,26 +234,38 @@ cleanup() {
         echo "  luksClose failed (maybe not open)" && return 1
 }
 
-### ------ Main logic ------ ###
+# ────────────────────────────────────────────────
+# Main logic
+# ────────────────────────────────────────────────
 
 # Parse flags
+profile=""
 dry_run=false
 verbose=false
 use_agent=false
+skip_confirm=false
+one_shot=false
+local_src=""
+remote_dest=""
 
-while getopts ":dva" opt; do
+while getopts ":dva:s:r:p:y" opt; do
     case $opt in
         d) dry_run=true ;;
         v) verbose=true ;;
         a) use_agent=true ;;
-        \?) echo "Usage: $0 [-d dry-run] [-v verbose] [-a ssh-agent mode]"; exit 1 ;;
+        s) local_src="$OPTARG"; one_shot=true ;;
+        r) remote_dest="$OPTARG"; one_shot=true ;;
+        p) profile="$OPTARG" ;;
+        y) skip_confirm=true ;;
+        \?) echo "Usage: $0 [-d] [-v] [-a] [-s local_src] [-r remote_dest] [-p profile_number] [-y skip confirmation]" >&2
+            exit 1 ;;
     esac
 done
 shift $((OPTIND-1))
 
 [[ $verbose == true ]] && set -x
 
-# If using agent don't pass private key file
+# Agent mode
 [[ $use_agent == true ]] && ssh_privkey=""
 
 # ── Stage 0: Configuration & validation ──
@@ -269,7 +293,6 @@ keyfile="${keyfile/#\~/$HOME}"
 wakeup "$remote_host" "$remote_mac" "$subnet_broadcast" || { echo "Wake failed"; exit 1; }
 ping_host "$remote_ip" "$MAX_PING_ATTEMPTS" || { echo "Host never came online"; exit 1; }
 
-# Test basic SSH
 ssh_test=$(build_ssh_cmd "$ssh_port" "$ssh_privkey" "$SSH_OPTIONS_BASE")
 $ssh_test "$remote_target" "exit 0" &>/dev/null ||
     { echo "Cannot connect via SSH"; exit 1; }
@@ -287,54 +310,173 @@ check_mapper_status "$ssh_port" "$ssh_privkey" "$SSH_OPTIONS_BASE" "$remote_targ
 decrypt "$ssh_port" "$ssh_privkey" "$SSH_OPTIONS_BASE" "$remote_target" "$remote_dev" "$mapper_name" "$keyfile" ||
     { echo "Decryption failed"; exit 1; }
 
-# Set trap
+# Trap for cleanup on exit / interrupt
 trap 'ret=$?; cleanup "$ssh_port" "$ssh_privkey" "$SSH_OPTIONS_BASE" "$remote_target" "$mount_path" "$mapper_name" "$remote_dev"; exit $ret' EXIT INT TERM
 
 mount_drive "$ssh_port" "$ssh_privkey" "$SSH_OPTIONS_BASE" "$remote_target" "$mapper_name" "$mount_path" ||
     { echo "Mount failed"; exit 1; }
 
-### ------ Stage 2: Rsync loop ------ ###
+### ------ Stage 2: Rsync – decide mode ------ ###
 
-if [[ $dry_run == true ]]; then
+if $one_shot; then
+    # ── One-shot mode ── (must exit here)
+    if [[ -z "$local_src" || -z "$remote_dest" ]]; then
+        echo "Error: One-shot mode requires both -s LOCAL_SRC and -r REMOTE_DEST" >&2
+        exit 1
+    fi
+
+    if command -v realpath >/dev/null 2>&1; then
+        local_src=$(realpath -m "$local_src" 2>/dev/null || echo "$local_src")
+    fi
+    remote_dest=$(sanitize_path "$remote_dest")
+
+    echo ""
+    echo "One-shot mode – single transfer"
+    echo "  Source     : $local_src"
+    echo "  Destination: $remote_dest"
+
+    # Profile selection
+    if $dry_run; then
+        echo "Dry-run mode active."
+        flags="-ah --delete --dry-run --itemize-changes --info=progress2,stats"
+    else
+        if [[ -n "${profile:-}" ]]; then
+            case "$profile" in
+                1)
+                    flags="-aHXX --numeric-ids --delete --delete-excluded --inplace --copy-links "
+                    flags+="--info=progress2 --stats --log-file=./rsync-backup-$(date +"$LOG_TIMESTAMP_FORMAT").log"
+                    echo "Using profile 1: LAN Fast Mirror (forced via -p)"
+                    ;;
+                4)
+                    flags="-aHAX --numeric-ids --copy-links --info=progress2 --stats "
+                    flags+="--rsync-path=\"sudo rsync\" "
+                    flags+="--log-file=./rsync-timeshift-$(date +"$LOG_TIMESTAMP_FORMAT").log"
+                    echo "Using profile 4: Timeshift Snapshot Mirror (forced via -p)"
+                    ;;
+                *)
+                    echo "Error: Invalid profile '$profile'. Use 1 or 4." >&2
+                    exit 1
+                    ;;
+            esac
+        else
+            echo "Select rsync profile for this transfer:"
+            rsync_menu || { echo "Aborted."; exit 0; }
+        fi
+    fi
+
+    echo "  Flags      : $flags"
+    echo ""
+
+    if $skip_confirm; then
+        echo "Confirmation skipped (-y)"
+        if run_rsync "$flags" "$local_src" "$remote_dest" "$ssh_port" "$ssh_privkey" "$remote_target" "$mount_path"; then
+            echo "Performing cleanup..."
+            cleanup "$ssh_port" "$ssh_privkey" "$SSH_OPTIONS_BASE" "$remote_target" "$mount_path" "$mapper_name" "$remote_dev" ||
+                echo "Cleanup had warnings."
+            echo "Done."
+        else
+            echo "rsync failed → cleanup skipped."
+            exit 1
+        fi
+    else
+        if confirm_and_run "$flags" "$local_src" "$remote_dest" "$ssh_port" "$ssh_privkey" "$remote_target" "$mount_path"; then
+            echo "Performing cleanup..."
+            cleanup "$ssh_port" "$ssh_privkey" "$SSH_OPTIONS_BASE" "$remote_target" "$mount_path" "$mapper_name" "$remote_dev" ||
+                echo "Cleanup had warnings."
+            echo "Done."
+        else
+            echo "Transfer cancelled/failed → cleanup skipped."
+            exit 1
+        fi
+    fi
+
+    # Force exit after one-shot (this line prevents fall-through)
+    exit 0
+fi
+
+# ── Interactive mode ── (only if NOT one-shot)
+echo ""
+echo "Entering interactive multi-folder mode (q to quit)"
+echo "Remote base path: $mount_path/"
+echo ""
+
+if $dry_run; then
     echo "Dry-run mode active."
-    flags="-ah --delete --dry-run --itemize-changes --verbose --stats"
+    flags="-ah --delete --dry-run --itemize-changes --info=progress2,stats"
 else
-    rsync_menu || { echo "Aborted from menu."; exit 0; }
+    if [[ -n "${profile:-}" ]]; then
+        case "$profile" in
+            1)
+                flags="-aHXX --numeric-ids --delete --delete-excluded --inplace --copy-links "
+                flags+="--info=progress2 --stats --log-file=./rsync-backup-$(date +"$LOG_TIMESTAMP_FORMAT").log"
+                echo "Using profile 1: LAN Fast Mirror (forced via -p)"
+                ;;
+            4)
+                flags="-aHAX --numeric-ids --copy-links --info=progress2 --stats "
+                flags+="--rsync-path=\"sudo rsync\" "
+                flags+="--log-file=./rsync-timeshift-$(date +"$LOG_TIMESTAMP_FORMAT").log"
+                echo "Using profile 4: Timeshift Snapshot Mirror (forced via -p)"
+                ;;
+            *)
+                echo "Error: Invalid profile '$profile'. Use 1 or 4." >&2
+                exit 1
+                ;;
+        esac
+    else
+        echo "Select default rsync profile for this session:"
+        rsync_menu || { echo "Aborted."; exit 0; }
+    fi
 fi
 
 while true; do
-    echo -e "\n--- Transfer setup ---"
+    echo -e "\n--- Next transfer ---"
 
     while true; do
         read -e -r -p "Local source (or 'q' to quit): " local_src
-        [[ $local_src == q ]] && { echo "Exiting."; break 2; }
-        local_src=$(sanitize_path "$local_src")
-        [[ -e $local_src ]] && break
-        echo "Path does not exist."
+        [[ "$local_src" == "q" || "$local_src" == "Q" ]] && { echo "Exiting."; break 2; }
+        if command -v realpath >/dev/null 2>&1; then
+            local_src=$(realpath -m "$local_src" 2>/dev/null || echo "$local_src")
+        fi
+        if [[ -e "$local_src" ]]; then
+            break
+        else
+            echo "Error: path does not exist"
+        fi
     done
 
-    read -e -r -p "Remote destination (or 'q' to quit): " remote_dest
-    [[ $remote_dest == q ]] && { echo "Exiting."; break; }
+    read -e -r -p "Remote destination (relative — no leading /, or 'q'): " remote_dest
+    [[ "$remote_dest" == "q" || "$remote_dest" == "Q" ]] && { echo "Exiting."; break; }
     remote_dest=$(sanitize_path "$remote_dest")
+    [[ -z "$remote_dest" ]] && { echo "Destination cannot be empty."; continue; }
 
-    [[ $dry_run == false ]] && rsync_menu || true
+    if ! $dry_run; then
+        read -r -p "Change rsync profile for this transfer? (y/N): " change_profile
+        if [[ "${change_profile,,}" == "y" ]]; then
+            echo "Select profile:"
+            rsync_menu || { echo "Aborted."; break; }
+        else
+            echo "Using current: $flags"
+        fi
+    fi
 
     confirm_and_run "$flags" "$local_src" "$remote_dest" "$ssh_port" "$ssh_privkey" "$remote_target" "$mount_path" ||
-        { echo "Sync failed or cancelled."; break; }
+        echo "This transfer was cancelled or failed — continuing..."
 
-    read -r -p "Sync another directory? (y/N/q): " cont
-    case "$cont" in
-        [yY]*) continue ;;
-        [qQ]*) break ;;
-        *) break ;;
+    read -r -p "Sync another directory? (y/N/q to quit): " cont
+    case "${cont,,}" in
+        q) echo "Exiting."; break ;;
+        y) continue ;;
+        *) echo "Exiting."; break ;;
     esac
 done
 
-# Explicit cleanup call (also handled by the trap)
+# Final cleanup (interactive path only)
+echo ""
+echo "Performing final cleanup..."
 if cleanup "$ssh_port" "$ssh_privkey" "$SSH_OPTIONS_BASE" "$remote_target" "$mount_path" "$mapper_name" "$remote_dev"; then
     echo "Cleanup successful. Session closed."
     exit 0
 else
-    echo "Cleanup incomplete — manual check recommended."
+    echo "Cleanup had warnings — check manually."
     exit 1
 fi
