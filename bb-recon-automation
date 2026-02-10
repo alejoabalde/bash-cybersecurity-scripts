@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+### Global settings ###
+
+
+
+
+
+### Configuration ###
+pd_dependencies=("go" "masscan" "nmap")
+pd_tools=("subfinder" "shuffledns" "alterx" "dnsx" "naabu" "httpx" "katana")
+
+
+
+
+### Functions ###
+
+# Check if required Project Discovery tools are installed.
+check_pd_required_tools() {
+echo -e "\nChecking if required tools are installed.\n"
+
+for tool in "${pd_required_tools[@]}"; do
+    if command -v "$tool" &> /dev/null; then
+        echo "Tool: $tool is already installed."
+        continue
+    else
+        echo "Warning: $tool is not installed."
+    fi
+done
+}
+
+# Check if prerequirements for PDTM are met.
+check_pd_dependecies() {
+echo -e "\nChecking if Project Discovery dependencies are met.\n"
+
+for tool in "${pd_dependencies[@]}"; do
+    if command -v "$tool" &>/dev/null; then
+        echo "$tool is already installed."
+        continue
+    else
+        echo "Warning: $tool is not installed."
+    fi
+done
+}
+
+
+# Install prerequired tools
+install_pd_dependencies() {
+    for tool in "${pd_dependencies[@]}"; do
+        if command -v "$tool" &>/dev/null; then
+            echo "$tool is already installed."
+            continue
+        fi
+        
+        echo "Installing $tool..."
+        
+        if command -v apt &>/dev/null; then
+            sudo apt update && sudo apt install -y "$tool"
+        elif command -v pacman &>/dev/null; then
+            sudo pacman -S --noconfirm "$tool"
+        else
+            echo "Error: No supported package manager found. Please install manually."
+            return 1
+        fi
+
+        if command -v "$tool" &>/dev/null; then
+            echo "$tool was installed successfully."
+        else
+            echo "Failed to install $tool."
+            return 1
+        fi
+    done
+}
+
+# Install required tools
+install_pdtm() {
+    if command -v pdtm &>/dev/null; then
+        echo "PDTM is already installed!"
+        return 0
+    fi
+    
+    echo "Checking if go is correctly set on \$PATH"
+    if [[ ! "$PATH" =~ "/go/bin" ]]; then
+        echo "go path is not part of the \$PATH. Adding it now through ~/.bashrc"
+        cat << 'EOF' >> "$HOME/.bashrc"
+export GOPATH="$HOME/go"
+export PATH="$PATH:$GOPATH/bin"
+EOF
+    
+    export GOPATH="$HOME/go"
+    export PATH="$PATH:$GOPATH/bin"
+    else
+        echo "Go path is already present."
+    fi
+
+    echo "Installing PDTM (Project Discovery Tool Manager)"
+    go install -v github.com/projectdiscovery/pdtm/cmd/pdtm@latest
+
+    if [[ $? -eq 0 ]]; then
+        echo "SUCCESS! PDTM is now installed."
+    else
+        echo "ERROR: Failed to install PDTM."
+        return 1
+    fi
+}
+
+install_pd_tools() {
+    
+    echo "Installing required tools..."
+    # pdtm -ia -igp
+
+}
+
+### Main Logic ###
+
+
+
+
+####################### TEXT WALL #######################
+echo -e "This script uses Project Discovery tools to perform each task. Before starting, make sure you have installed the required tools in your system."
+echo -e "You can install them through PDTM (Project Discovery's Tool Manager), Use [-i pdtm] to install PDTM or use [-i tools] to install them through "
+echo -e "PDTM"
+
+
