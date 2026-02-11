@@ -3,7 +3,8 @@
 set -euo pipefail
 
 ### Global settings ###
-
+domain=""
+output_dir=""
 
 
 
@@ -128,8 +129,112 @@ install_script_tools() {
     fi
 }
 
+# Function to define domain and output directory if unspecified.
+define_variables() {
 
+    while [[ -z "$domain" ]]; do
+        read -e -r -p "Please specify a domain: " domain
+        [[ -z  "$domain" ]] && echo "[ERR] $domain cannot be empty."
+    done
+
+    local strip_protocol="${domain#*://}"
+    local strip_name="${strip_protocol#www.}"
+    local clean_name="${strip_name%%/*}"
+
+    if [[ -n "$output_dir" && -d "$output_dir" ]]; then
+       echo "[INF] Using existing directory: $output_dir"
+       return 0
+    fi
+
+    if [[ -z "$output_dir" ]]; then
+        output_dir="$clean_name"
+    fi
+
+    if [[ ! -d "$output_dir" ]]; then
+        mkdir -p "./$output_dir"
+        echo "[INF] Output will be stored in: $output_dir"
+    else
+        echo "[INF] Output will be stored in: $output_dir"
+    fi
+}
+
+# Confirm actions
+confirm_action() {
+    # general function to confirm actions after configuring a tool and before running.
+}
+
+# Configure Subfinder
+set_subfinder() {
+
+}
+
+# Run Subfinder
+run_subfinder() {
+    local output_file=""
+    echo -e "[INF] Starting subfinder.\n"
+    #subfinder -d <domain> -all -o domains.txt
+    subfinder -d "$domain" -all -o "$output_file"
+}
+
+# Configure ShuffleDNS
+set_shuffledns() {
+
+}
+
+# Run ShuffleDNS
+run_shuffledns(){
+
+}
+# Configure AlterX
+set_alterx() {
+
+}
+# Run AlterX
+run_alterx() {
+
+}
+# Configure DNSX
+set_dnsx() {
+
+}
+# Run DNSX
+run_dnsx() {
+
+}
+# Configure Naabu
+set_naabu() {
+
+}
+# Run Naabu
+run_naabu() {
+
+}
+
+# Configure HTTPX
+set_httpx() {
+
+}
+# Run HTTPX
+run_httpx() {
+
+}
+# Configure Katana
+set_katana() {
+
+}
+# Run Katana
+run_katana() {
+
+}
+
+# Generate report
+generate_report() {
+
+}
+
+##################
 ### Main Logic ###
+##################
 
 # Flags options
 install_tools=()
@@ -149,6 +254,10 @@ while getopts ":i:vh" opt; do
             echo "Usage: $0 [-i pdmt] [-i tools] [-v verbose] [-h help]"
             exit 0
             ;;
+        *) 
+            echo "Usage: $0 [-i pdmt] [-i tools] [-v verbose] [-h help]"
+            exit 0
+            ;;
         \?)
             echo "Invalid option: -$OPTARG" >&2
             exit 1
@@ -157,9 +266,9 @@ while getopts ":i:vh" opt; do
 done
 shift $((OPTIND-1))
 
-if [[ ${#install_tools[@]} -eq 0 ]]; then
-    echo -e "\n[WRN] No option was specified via -i. Skipping installation."
-fi
+#if [[ ${#install_tools[@]} -eq 0 ]]; then
+#    echo -e "\n[WRN] No option was specified via -i. Skipping installation."
+#fi
 
 for task in "${install_tools[@]}"; do
     case "$task" in
@@ -178,9 +287,54 @@ done
 
 [[ $verbose == true ]] && set -x
 
-####################### TEXT WALL #######################
-#echo -e "This script uses Project Discovery tools to perform each task. Before starting, make sure you have installed the required tools in your system."
-#echo -e "You can install them through PDTM (Project Discovery's Tool Manager), Use [-i pdtm] to install PDTM or use [-i tools] to install them through "
-#echo -e "PDTM"
+#### ------ Phase 1: Asset Discovery ------ ####
 
+## Logo here
+## Initial instructions here
+
+# Define domain and output directory
+define_variables
+
+# Configure and run Subfinder
+set_subfinder
+confirm_action
+run_subfinder
+
+# Configure and run ShuffleDNS
+set_shuffledns
+confirm_action
+run_shuffledns
+
+# Configure and run AlterX
+set_alterx
+confirm_action
+run_alterx
+
+# Configure and run DNSX
+set_dnsx
+confirm_action
+run_dnsx
+
+# Configure and run Naabu
+set_naabu
+confirm_action
+run_naabu
+
+#### ------ Phase 2: Content Discovery ---- ####
+
+# Configure and run HTTPX
+set_httpx
+confirm_action
+run_httpx
+# Configure and run Katana
+set_katana
+confirm_action
+run_katana
+
+# Consider run URLFinder with Katana to gather URLs from external sources
+
+#### ------ Phase 3: Report Generation ------ ####
+
+# Generate report
+generate_report
 
