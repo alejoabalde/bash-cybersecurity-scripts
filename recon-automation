@@ -8,7 +8,6 @@ output_dir=""
 
 
 
-
 ### Configuration ###
 pd_tools=("subfinder" "shuffledns" "alterx" "dnsx" "naabu" "httpx" "katana" "urlfinder" "nuclei")
 
@@ -19,40 +18,38 @@ pd_tools=("subfinder" "shuffledns" "alterx" "dnsx" "naabu" "httpx" "katana" "url
 
 # Check if script tools are isntalled.
 check_script_tools() {
-echo -e "\n[INF] Checking if required tools are installed...\n"
+    printf "\n[INF] Checking if required tools are installed...\n"
 
-for tool in "${pd_tools[@]}"; do
-    if command -v "$tool" &> /dev/null; then
-        echo -e "[INF] $tool is already installed."
-        continue
-    else
-        echo -e "[WRN] $tool is not installed."
-    fi
-done
+    for tool in "${pd_tools[@]}"; do
+        if command -v "$tool" &> /dev/null; then
+            printf "[INF] $tool is already installed.\n"
+            continue
+        else
+           printf "[WRN] $tool is not installed.\n"
+        fi
+    done
 }
 
-# Install script tools
 install_script_tools() {
-    echo -e "[INF] Installing required tools...\n"
+    printf "[INF] Installing required tools...\n"
 
     (IFS=,
     pdtm -i "${pd_tools[*]}" -igp)
     
     if [[ $? -eq 0 ]]; then
-        echo "[INF] All required tools were installed."
+        printf "[INF] All required tools were installed.\n"
     else
-        echo "[ERR] Failed to install required tools."
+        printf "[ERR] Failed to install required tools.\n"
         return 1
     fi
 }
-#install_script_tools
-#exit 0
-# Function to define domain and output directory if unspecified.
+
+# Define domain and output directory if unspecified.
 define_variables() {
 
     while [[ -z "$domain" ]]; do
         read -e -r -p "Please specify a domain: " domain
-        [[ -z  "$domain" ]] && echo "[ERR] $domain cannot be empty."
+        [[ -z  "$domain" ]] && printf "[ERR] $domain cannot be empty.\n"
     done
 
     local strip_protocol="${domain#*://}"
@@ -60,7 +57,7 @@ define_variables() {
     local clean_name="${strip_name%%/*}"
 
     if [[ -n "$output_dir" && -d "$output_dir" ]]; then
-       echo "[INF] Using existing directory: $output_dir"
+       printf "[INF] Using existing directory: $output_dir.\n"
        return 0
     fi
 
@@ -70,31 +67,104 @@ define_variables() {
 
     if [[ ! -d "$output_dir" ]]; then
         mkdir -p "./$output_dir"
-        echo "[INF] Output will be stored in: $output_dir"
+        printf "[INF] Output will be stored in: $output_dir.\n"
     else
-        echo "[INF] Output will be stored in: $output_dir"
+        printf "[INF] Output will be stored in: $output_dir\n"
     fi
 }
 
-# Confirm actions
-#confirm_action() {}
-
-# Configure Subfinder
-#set_subfinder() {}
-
-# Run Subfinder
 run_subfinder() {
-    local output_file=""
-    echo -e "[INF] Starting subfinder.\n"
-    #subfinder -d <domain> -all -o domains.txt
-    subfinder -d "$domain" -all -o "$output_file"
+    subfinder_out="$output_dir/subfinder_$(basename "$output_dir").txt"
+    local subfinder_flags=(-d "$domain" -all -o "$subfinder_out" -silent)
+    
+    printf "\n[INF] Setting up Subfinder\n"
+    printf "[INF] It is highly recommended to populate Subfinder's config file: (~/.config/subfinder/provider-config.yaml)\n"
+    printf "      %s\n" "with API keys from various sources to enhance subdomain discovery."
+
+    while true; do
+        read -e -r -p "[!] Do you wish to configure it before running? (Y/n) " confirm
+        case "$confirm" in
+            [yY]*)
+                printf "[!] Please populate you config file and write YES when you are done." 
+                while true; do
+                    read -e -r -p "Continue? " confirm
+                    if [[ "$confirm" =~ ^[yY][eE][sS]$ ]]; then
+                        break
+                    else
+                        printf "[!] Wrong option. Type YES to continue."
+                    fi
+                done
+                break
+                ;;
+            [nN]*) 
+                printf "[!] Continuing..."
+                break
+                ;;
+            *) printf "[!] Wrong option. Select (y/n)" ;;
+        esac
+    done      
+
+    printf "\n###############################################################\n"
+    printf "##################### Starting Subfinder #####################\n"
+    printf "###############################################################\n"
+
+    subfinder "${subfinder_flags[@]}" &>/dev/null
+    
+    if [[ $? -eq 0 ]]; then
+        local findings=$(wc -l <"$subfinder_out")
+        printf "[INF] Subfinder done - $findings subdomains saved."
+    else
+        printf "[ERR] Subfinder failed."
+        return 1
+    fi
 }
 
-# Configure ShuffleDNS
-#set_shuffledns() {}
+run_shuffledns() {
+    local wordlist="${PWD}/wordlist.txt"
+    local resolvers="${PWD}/resolvers.txt"
+    shuffledns_out="$output_dir/shuffledns_$(basename "$output_dir").txt"
+    local shuffledns_flags=(-d "$domain" -w "$wordlist" -r "$resolvers" -mode bruteforce -o "$shuffledns_out" -silent)
 
-# Run ShuffleDNS
-#run_shuffledns(){}
+    printf "\n[INF] Setting up ShuffleDNS\n"
+    printf "[INF] Shuffledns requires a public DNS resolvers list and curated bruteforcing wordlists for best results.\n"
+    printf "      \n%s\n" "Recommended sources:"
+    printf "   %s\n" "- Trickest  (Resolvers):  https://github.com/trickest/resolvers/blob/main/resolvers.txt"
+    printf "   %s\n" "- SecLists  (Wordlists):  https://github.com/danielmiessler/SecLists"
+    printf "   %s\n" "- AssetNote (Wordlists):  https://wordlists.assetnote.io"
+    printf "\n[!] Download one and save as resolvers.txt in your working directory.\n"
+    printf "[!] Download one and save as wordlist.txt in your working directory.\n\n"
+    printf "[!] Enter YES when you are done.\n"
+
+    while true; do
+        read -e -r -p "[!] Ready to continue? " confirm
+        if [[ "$confirm" =~ ^[yY][eE][sS]$ ]]; then
+            if [[ ! -f "$wordlist" || ! -f "$resolvers" ]]; then
+                printf "[ERR] Missing files! Ensure both wordlist.txt and resolvers.txt exist.\n"
+                continue
+            else
+                break
+            fi
+        else
+            continue
+        fi
+    done
+
+    printf "\n###############################################################\n"
+    printf "##################### Starting ShuffleDNS #####################\n"
+    printf "###############################################################\n"
+
+    printf "\n[INF] Starting ShuffleDNS\n"
+    shuffledns "${shuffledns_flags[@]}" &>/dev/null
+
+    if [[ $? -eq 0 ]]; then
+        local findings=$(wc -l < "$shuffledns_out")
+        printf "\n[INF] ShuffleDNS done - $findings subdomains saved.\n"
+    else
+        printf "[ERR] ShuffleDNS failed."
+        return 1
+    fi
+}
+
 
 # Configure AlterX
 #set_alterx() {}
@@ -182,14 +252,20 @@ done
 ## Initial instructions here
 
 # Define domain and output directory
+define_variables ||
+    { echo "[DBG] Function define_variables failed."; exit 1; }
+
+echo -e "\n#### ------ Phase 1: Asset Discovery ------ ####"
+echo -e "  ### --- Step 1: Passive Enumeration --- ###\n"
 
 # Configure and run Subfinder
-
-# Configure and run ShuffleDNS
+run_subfinder "$domain" "$output_dir" || { echo "[DBG] Subfinder failed."; exit 1; }
 
 # Configure and run AlterX
 
 # Configure and run DNSX
+
+# Configure and run ShuffleDNS
 
 # Configure and run Naabu
 #echo "[WRN] This scan is active / Noisy"
