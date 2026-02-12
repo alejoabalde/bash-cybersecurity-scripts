@@ -19,7 +19,7 @@ pd_tools=("subfinder" "shuffledns" "alterx" "dnsx" "naabu" "httpx" "katana" "url
 
 # Check if script tools are isntalled.
 check_script_tools() {
-echo -e "\n[INF] Checking if required tools are installed."
+echo -e "\n[INF] Checking if required tools are installed...\n"
 
 for tool in "${pd_tools[@]}"; do
     if command -v "$tool" &> /dev/null; then
@@ -30,16 +30,14 @@ for tool in "${pd_tools[@]}"; do
     fi
 done
 }
-check_script_tools
 
 # Install script tools
 install_script_tools() {
-    echo -e "\n[INF] Installing required tools..."
+    echo -e "[INF] Installing required tools...\n"
 
     (IFS=,
-    echo "[DEBUG] pdtm -i ${pd_tools[*]} -igp")
-    pdtm -i ${pd_tools[*]} -igp
-
+    pdtm -i "${pd_tools[*]}" -igp)
+    
     if [[ $? -eq 0 ]]; then
         echo "[INF] All required tools were installed."
     else
@@ -47,8 +45,8 @@ install_script_tools() {
         return 1
     fi
 }
-install_script_tools
-exit 0
+#install_script_tools
+#exit 0
 # Function to define domain and output directory if unspecified.
 define_variables() {
 
@@ -79,14 +77,10 @@ define_variables() {
 }
 
 # Confirm actions
-confirm_action() {
-    # general function to confirm actions after configuring a tool and before running.
-}
+#confirm_action() {}
 
 # Configure Subfinder
-set_subfinder() {
-
-}
+#set_subfinder() {}
 
 # Run Subfinder
 run_subfinder() {
@@ -97,60 +91,43 @@ run_subfinder() {
 }
 
 # Configure ShuffleDNS
-set_shuffledns() {
-
-}
+#set_shuffledns() {}
 
 # Run ShuffleDNS
-run_shuffledns(){
+#run_shuffledns(){}
 
-}
 # Configure AlterX
-set_alterx() {
+#set_alterx() {}
 
-}
 # Run AlterX
-run_alterx() {
+#run_alterx() {}
 
-}
 # Configure DNSX
-set_dnsx() {
+#set_dnsx() {}
 
-}
 # Run DNSX
-run_dnsx() {
+#run_dnsx() {}
 
-}
 # Configure Naabu
-set_naabu() {
+#set_naabu() {}
 
-}
 # Run Naabu
-run_naabu() {
-
-}
+#run_naabu() {}
 
 # Configure HTTPX
-set_httpx() {
+#set_httpx() {}
 
-}
 # Run HTTPX
-run_httpx() {
-
-}
+#run_httpx() { }
 # Configure Katana
-set_katana() {
 
-}
+#set_katana() {}
+
 # Run Katana
-run_katana() {
-
-}
+#run_katana() {}
 
 # Generate report
-generate_report() {
-
-}
+#generate_report() {}
 
 ##################
 ### Main Logic ###
@@ -163,10 +140,10 @@ verbose=false
 while getopts ":i:vh" opt; do
     case $opt in
         i)
-            if [[ "$OPTARG" == "pdtm" || "$OPTARG" == "tools" ]]; then
+            if [[ "$OPTARG" == "tools" ]]; then
                 install_tools+=("$OPTARG")
             else
-                echo "Error: Invalid argument for -i. Use 'pdtm' or 'tools'." >&2
+                echo "Error: Invalid argument for -i. Use 'tools'." >&2
             fi
             ;;
         v) verbose=true ;;
@@ -186,19 +163,10 @@ while getopts ":i:vh" opt; do
 done
 shift $((OPTIND-1))
 
-#if [[ ${#install_tools[@]} -eq 0 ]]; then
-#    echo -e "\n[WRN] No option was specified via -i. Skipping installation."
-#fi
-
 for task in "${install_tools[@]}"; do
     case "$task" in
-        "pdtm")
-            echo -e "[INF] Starting PDTM installation sequence...\n"
-            install_tools_dependencies
-            install_pdtm
-            ;;
         "tools")
-            echo "\n[INF] INFStarting tools installation...\n"
+            #echo -e "\n[INF] Starting tools installation..."
             check_script_tools
             install_script_tools
             ;;
@@ -214,50 +182,28 @@ done
 ## Initial instructions here
 
 # Define domain and output directory
-define_variables
 
 # Configure and run Subfinder
-set_subfinder
-confirm_action
-run_subfinder
 
 # Configure and run ShuffleDNS
-set_shuffledns
-confirm_action
-run_shuffledns
 
 # Configure and run AlterX
-set_alterx
-confirm_action
-run_alterx
 
 # Configure and run DNSX
-set_dnsx
-confirm_action
-run_dnsx
 
 # Configure and run Naabu
-echo "[WRN] This scan is active / Noisy"
-set_naabu
-confirm_action
-run_naabu
+#echo "[WRN] This scan is active / Noisy"
 
 #### ------ Phase 2: Content Discovery ---- ####
 
 # Configure and run HTTPX
-set_httpx
-confirm_action
-run_httpx
+
 # Configure and run Katana
-echo "[WRN] This scan is active / Noisy"
-set_katana
-confirm_action
-run_katana
+#echo "[WRN] This scan is active / Noisy"
 
 # Consider run URLFinder with Katana to gather URLs from external sources
 
 #### ------ Phase 3: Report Generation ------ ####
 
 # Generate report
-generate_report
 
