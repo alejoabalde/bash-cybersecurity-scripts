@@ -16,8 +16,7 @@ pd_tools=("subfinder" "shuffledns" "alterx" "dnsx" "naabu" "httpx" "katana" "url
 
 ### Functions ###
 
-# Check if script tools are isntalled.
-check_script_tools() {
+install_script_tools() {
     printf "\n[INF] Checking if required tools are installed...\n"
 
     for tool in "${pd_tools[@]}"; do
@@ -28,18 +27,16 @@ check_script_tools() {
            printf "[WRN] $tool is not installed.\n"
         fi
     done
-}
 
-install_script_tools() {
     printf "[INF] Installing required tools...\n"
 
     (IFS=,
     pdtm -i "${pd_tools[*]}" -igp)
     
     if [[ $? -eq 0 ]]; then
-        printf "[INF] All required tools were installed.\n"
+        printf "\n[INF] All required tools were installed.\n"
     else
-        printf "[ERR] Failed to install required tools.\n"
+        printf "[ERR] Failed to install required tools.\n\n"
         return 1
     fi
 }
@@ -48,7 +45,8 @@ install_script_tools() {
 define_variables() {
 
     while [[ -z "$domain" ]]; do
-        read -e -r -p "Please specify a domain: " domain
+        printf "\n[!] Please specify a domain: "
+        read -e -r -p "" domain
         [[ -z  "$domain" ]] && printf "[ERR] $domain cannot be empty.\n"
     done
 
@@ -67,25 +65,83 @@ define_variables() {
 
     if [[ ! -d "$output_dir" ]]; then
         mkdir -p "./$output_dir"
-        printf "[INF] Output will be stored in: $output_dir.\n"
+        printf "[INF] Output will be stored in directory: $output_dir.\n"
     else
-        printf "[INF] Output will be stored in: $output_dir\n"
+        printf "[INF] Output will be stored in directory: $output_dir\n"
     fi
+}
+
+check_before_run() {
+    local tool_name="$1"
+    local tool_out="$2" 
+
+    if [[ -f "$tool_out" && -s "$tool_out" ]]; then
+        echo -e "\n[WRN] $tool_name output already exists. File: $tool_out"
+        read -e -r -p "[OPT] Skip $tool_name (s), Overwrite File (o), or Backup File (b)? [S/o/b]: " choise
+        
+        case "$choise" in
+            [sS]*)
+                printf "[INF] Skipping $tool_name step.\n"
+                return 1
+                ;;
+            [oO]*)
+                printf "[INF] Overwriting existing file...\n"
+                return 0
+                ;;
+            [bB]*)
+                local timestamp=$(date +"%Y%m%d_%H%M")
+                local backup_file="${tool_out}_${timestamp}.bak"
+                mv "$tool_out" "$backup_file"
+                printf "[INF] Moved existing results to: %s\n" "$backup_file"
+                return 0
+                ;;
+            *) 
+                printf "[ERR] Invalid option. Skipping Subfinder step.\n"
+                return 0 
+                ;;
+        esac
+    fi
+    return 0
 }
 
 run_subfinder() {
     subfinder_out="$output_dir/subfinder_$(basename "$output_dir").txt"
     local subfinder_flags=(-d "$domain" -all -o "$subfinder_out" -silent)
-    
-    printf "\n[INF] Setting up Subfinder\n"
-    printf "[INF] It is highly recommended to populate Subfinder's config file: (~/.config/subfinder/provider-config.yaml)\n"
-    printf "      %s\n" "with API keys from various sources to enhance subdomain discovery."
+  
+    if [[ -f "$subfinder_out" && -s "$subfinder_out" ]]; then
+        echo -e "\n[WRN] Subfinder output already exists. File: $subfinder_out"
+        read -e -r -p "[OPT] Skip Subfinder (s), Overwrite File (o), or Backup File (b)? [S/o/b]: " choise
+        
+        case "$choise" in
+            [sS]*)
+                printf "[INF] Skipping Subfinder step.\n"
+                return 0
+                ;;
+            [oO]*)
+                printf "[INF] Overwriting existing file...\n"
+                ;;
+            [bB]*)
+                local timestamp=$(date +"%Y%m%d_%H%M")
+                local backup_file="${subfinder_out}_${timestamp}.bak"
+                mv "$subfinder_out" "$backup_file"
+                printf "[INF] Moved existing results to: %s\n" "$backup_file"
+                ;;
+            *) 
+                printf "[ERR] Invalid option. Skipping Subfinder step.\n"
+                return 0 
+                ;;
+        esac
+    fi
+
+    printf "\n[INF] Setting up Subfinder.\n"
+    printf "[INF] This tool will run a passive scan.\n"
+    printf "[INF] It is highly recommended to populate Subfinder's config file: (~/.config/subfinder/provider-config.yaml) with API keys from various sources to enhance subdomain discovery.\n"
 
     while true; do
         read -e -r -p "[!] Do you wish to configure it before running? (Y/n) " confirm
         case "$confirm" in
             [yY]*)
-                printf "[!] Please populate you config file and write YES when you are done." 
+                printf "[!] Please populate you config file and write YES when you are done.\n" 
                 while true; do
                     read -e -r -p "Continue? " confirm
                     if [[ "$confirm" =~ ^[yY][eE][sS]$ ]]; then
@@ -104,9 +160,9 @@ run_subfinder() {
         esac
     done      
 
-    printf "\n###############################################################\n"
-    printf "##################### Starting Subfinder #####################\n"
-    printf "###############################################################\n"
+    printf "\n####################################################################\n"
+    printf "##################### Starting Subfinder ###########################\n"
+    printf "####################################################################\n"
 
     subfinder "${subfinder_flags[@]}" &>/dev/null
     
@@ -126,13 +182,15 @@ run_shuffledns() {
     local shuffledns_flags=(-d "$domain" -w "$wordlist" -r "$resolvers" -mode bruteforce -o "$shuffledns_out" -silent)
 
     printf "\n[INF] Setting up ShuffleDNS\n"
-    printf "[INF] Shuffledns requires a public DNS resolvers list and curated bruteforcing wordlists for best results.\n"
+    printf "[WRN] This tool runs a ACTIVE and NOISY scan.\n\n"
+
+    printf "[INF] Shuffledns requires a list with public DNS resolvers and a curated bruteforcing wordlists for best results.\n"
     printf "      \n%s\n" "Recommended sources:"
     printf "   %s\n" "- Trickest  (Resolvers):  https://github.com/trickest/resolvers/blob/main/resolvers.txt"
     printf "   %s\n" "- SecLists  (Wordlists):  https://github.com/danielmiessler/SecLists"
     printf "   %s\n" "- AssetNote (Wordlists):  https://wordlists.assetnote.io"
-    printf "\n[!] Download one and save as resolvers.txt in your working directory.\n"
-    printf "[!] Download one and save as wordlist.txt in your working directory.\n\n"
+    printf "\n[!] Download one and save it as resolvers.txt in your working directory.\n"
+    printf "[!] Download one and save it as wordlist.txt in your working directory.\n\n"
     printf "[!] Enter YES when you are done.\n"
 
     while true; do
@@ -213,31 +271,27 @@ while getopts ":i:vh" opt; do
             if [[ "$OPTARG" == "tools" ]]; then
                 install_tools+=("$OPTARG")
             else
-                echo "Error: Invalid argument for -i. Use 'tools'." >&2
+                echo "[!] Invalid argument. Use [-i tools]" >&2
+                exit 1
             fi
             ;;
         v) verbose=true ;;
         h)
-            echo "Usage: $0 [-i pdmt] [-i tools] [-v verbose] [-h help]"
+            echo "[!] Usage: $0 [-i tools] [-v verbose] [-h help]"
             exit 0
             ;;
         *) 
-            echo "Usage: $0 [-i pdmt] [-i tools] [-v verbose] [-h help]"
+            echo "[!] Usage: $0 [-i tools] [-v verbose] [-h help]"
             exit 0
-            ;;
-        \?)
-            echo "Invalid option: -$OPTARG" >&2
-            exit 1
             ;;
     esac
 done
+
 shift $((OPTIND-1))
 
 for task in "${install_tools[@]}"; do
     case "$task" in
         "tools")
-            #echo -e "\n[INF] Starting tools installation..."
-            check_script_tools
             install_script_tools
             ;;
     esac
@@ -252,30 +306,37 @@ done
 ## Initial instructions here
 
 # Define domain and output directory
-define_variables ||
-    { echo "[DBG] Function define_variables failed."; exit 1; }
+define_variables || { echo "[DBG] define_variables failed."; exit 1; }
 
-echo -e "\n#### ------ Phase 1: Asset Discovery ------ ####"
-echo -e "  ### --- Step 1: Passive Enumeration --- ###\n"
+printf "\n####################################################################\n"
+printf "##################### Phase 1: Asset Discovery #####################\n"
+printf "####################################################################\n"
+
+# Perform a check before running Subfinder
+check_and_run subfinder "$subfinder_out" || { echo "[DBG] check_and_run failed. (could be related to Skipping option)"; exit 1; }
 
 # Configure and run Subfinder
-run_subfinder "$domain" "$output_dir" || { echo "[DBG] Subfinder failed."; exit 1; }
+run_subfinder "$domain" "$output_dir" || { echo "[DBG] run_subfinder failed."; exit 1; }
 
+# Configure and sun ShuffleDNS
+run_shuffledns || { echo "[DBG] run_shuffledns failed."; exit 1; }
+
+exit 0
 # Configure and run AlterX
-
+printf "\n[INF] This tool only creates permutations.\n"
 # Configure and run DNSX
 
 # Configure and run ShuffleDNS
 
 # Configure and run Naabu
-#echo "[WRN] This scan is active / Noisy"
+printf "\n[WRN] This tool runs a ACTIVE and NOISY scan.\n"
 
 #### ------ Phase 2: Content Discovery ---- ####
 
 # Configure and run HTTPX
 
 # Configure and run Katana
-#echo "[WRN] This scan is active / Noisy"
+printf "\n[WRN] This tool runs a ACTIVE and NOISY scan.\n"
 
 # Consider run URLFinder with Katana to gather URLs from external sources
 
