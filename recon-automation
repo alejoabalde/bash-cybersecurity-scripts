@@ -43,13 +43,14 @@ install_script_tools() {
 
 # Define domain and output directory if unspecified.
 define_variables() {
-
+    # Defines the domain if unspecified
     while [[ -z "$domain" ]]; do
         printf "\n[!] Please specify a domain: "
         read -e -r -p "" domain
         [[ -z  "$domain" ]] && printf "[ERR] $domain cannot be empty.\n"
     done
-
+    
+    # Defines the output directory if unspecified
     local strip_protocol="${domain#*://}"
     local strip_name="${strip_protocol#www.}"
     local clean_name="${strip_name%%/*}"
@@ -69,6 +70,11 @@ define_variables() {
     else
         printf "[INF] Output will be stored in directory: $output_dir\n"
     fi
+
+    # Defines the tool_out variable that will be used for each tool
+    for tool in "${pd_tools[@]}"; do
+        declare -g "${tool}_out=${clean_name}/${tool}_${clean_name}.txt"
+    done
 }
 
 check_before_run() {
@@ -105,34 +111,8 @@ check_before_run() {
 }
 
 run_subfinder() {
-    subfinder_out="$output_dir/subfinder_$(basename "$output_dir").txt"
     local subfinder_flags=(-d "$domain" -all -o "$subfinder_out" -silent)
   
-    if [[ -f "$subfinder_out" && -s "$subfinder_out" ]]; then
-        echo -e "\n[WRN] Subfinder output already exists. File: $subfinder_out"
-        read -e -r -p "[OPT] Skip Subfinder (s), Overwrite File (o), or Backup File (b)? [S/o/b]: " choise
-        
-        case "$choise" in
-            [sS]*)
-                printf "[INF] Skipping Subfinder step.\n"
-                return 0
-                ;;
-            [oO]*)
-                printf "[INF] Overwriting existing file...\n"
-                ;;
-            [bB]*)
-                local timestamp=$(date +"%Y%m%d_%H%M")
-                local backup_file="${subfinder_out}_${timestamp}.bak"
-                mv "$subfinder_out" "$backup_file"
-                printf "[INF] Moved existing results to: %s\n" "$backup_file"
-                ;;
-            *) 
-                printf "[ERR] Invalid option. Skipping Subfinder step.\n"
-                return 0 
-                ;;
-        esac
-    fi
-
     printf "\n[INF] Setting up Subfinder.\n"
     printf "[INF] This tool will run a passive scan.\n"
     printf "[INF] It is highly recommended to populate Subfinder's config file: (~/.config/subfinder/provider-config.yaml) with API keys from various sources to enhance subdomain discovery.\n"
@@ -178,13 +158,12 @@ run_subfinder() {
 run_shuffledns() {
     local wordlist="${PWD}/wordlist.txt"
     local resolvers="${PWD}/resolvers.txt"
-    shuffledns_out="$output_dir/shuffledns_$(basename "$output_dir").txt"
     local shuffledns_flags=(-d "$domain" -w "$wordlist" -r "$resolvers" -mode bruteforce -o "$shuffledns_out" -silent)
 
     printf "\n[INF] Setting up ShuffleDNS\n"
     printf "[WRN] This tool runs a ACTIVE and NOISY scan.\n\n"
 
-    printf "[INF] Shuffledns requires a list with public DNS resolvers and a curated bruteforcing wordlists for best results.\n"
+    printf "[INF] Shuffledns requires a list with public DNS resolvers and a bruteforcing wordlists for best results.\n"
     printf "      \n%s\n" "Recommended sources:"
     printf "   %s\n" "- Trickest  (Resolvers):  https://github.com/trickest/resolvers/blob/main/resolvers.txt"
     printf "   %s\n" "- SecLists  (Wordlists):  https://github.com/danielmiessler/SecLists"
@@ -225,34 +204,82 @@ run_shuffledns() {
 
 
 # Configure AlterX
-#set_alterx() {}
+run_alterx() {
+    local keywords_file="${PWD}/target-keywords.txt"
+    local alterx_flags=("-enrich" "-o" "$alterx_out")
+    local file_input=""
 
-# Run AlterX
-#run_alterx() {}
+    printf "\n[INF] Setting up AlterX\n"
 
-# Configure DNSX
-#set_dnsx() {}
+    # Sort by uniqueness into a single file
+    if [[ -s "$subfinder_out" && -s "$shuffledns_out" ]]; then
+        cat "$subfinder_out" "$shuffledns_out" | sort -u > combined_subs.txt
+        file_input="combined_subs.txt"
+    elif [[ -s "$subfinder_out" ]]; then
+        printf "[WRN] ShuffleDNS results missing. Using Subfinder output only.\n"
+        file_input="$subfinder_out"
+    elif [[ -s "$shuffledns_out" ]]; then
+        printf "[WRN] Subfinder results missing. Using ShuffleDNS output only.\n"
+        file_input="$shuffledns_out"
+    else
+        printf "[ERR] No input files found for AlterX! Skipping.\n"
+        return 1
+    fi
+
+    # Add target keywords
+    printf "[INF] It is highly recommended to add target specific keywords (company products, acronyms, brands, language specific terms) to enhance results.\n"
+    read -e -r -p "[!] Do you wish to add any? (Y/n): " add_choice
+
+    if [[ "$add_choice" =~ ^[yY]$ ]]; then
+        while true; do
+            printf "[!] create a file named target-keywords.txt containing a keyword per line.\n"
+            read -e -r -p "[OPT] Continue (c) or Skip addition (s): " loop_choice
+            if [[ "$loop_choice" =~ ^[cC]$ ]]; then
+                if [[ -s "$keywords_file" ]]; then
+                    # CORRECTED: Append flag as separate elements
+                    alterx_flags+=("-pp" "word=$keywords_file")
+                    break
+                else
+                    printf "[ERR] File not found or empty.\n"
+                fi
+            elif [[ "$loop_choice" =~ ^[sS]$ ]]; then
+                printf "[INF] Skipping keyword addition.\n"
+                break
+            fi
+        done
+    fi
+
+    # Run AlterX
+    printf "\n###############################################################\n"
+    printf "#####################   Starting Alterx   #####################\n"
+    printf "###############################################################\n"
+
+    printf "\n[INF] Starting AlterX\n"
+ 
+    cat "$file_input" | alterx "${alterx_flags[@]}" &> /dev/null
+
+    if [[ $? -eq 0 ]]; then
+        local findings=$(wc -l < "$alterx_out")
+        printf "\n[INF] AlterX done - $findings permutations saved.\n"
+    else
+        printf "[ERR] AlterX failed."
+        return 1
+    fi
+
+  }
 
 # Run DNSX
 #run_dnsx() {}
 
-# Configure Naabu
-#set_naabu() {}
-
 # Run Naabu
-#run_naabu() {}
+#run_naabu() {printf "\n[WRN] This tool runs a ACTIVE and NOISY scan.\n"}
 
-# Configure HTTPX
-#set_httpx() {}
 
 # Run HTTPX
-#run_httpx() { }
-# Configure Katana
-
-#set_katana() {}
+#run_httpx() {}
 
 # Run Katana
-#run_katana() {}
+#run_katana() {printf "\n[WRN] This tool runs a ACTIVE and NOISY scan.\n"}
 
 # Generate report
 #generate_report() {}
@@ -312,31 +339,33 @@ printf "\n####################################################################\n
 printf "##################### Phase 1: Asset Discovery #####################\n"
 printf "####################################################################\n"
 
-# Perform a check before running Subfinder
-check_and_run subfinder "$subfinder_out" || { echo "[DBG] check_and_run failed. (could be related to Skipping option)"; exit 1; }
+# Perform a check before running Subfinder and continue, otherwise skip it.
+if check_before_run subfinder "$subfinder_out"; then
+    run_subfinder "$domain" "$output_dir" 
+fi
 
-# Configure and run Subfinder
-run_subfinder "$domain" "$output_dir" || { echo "[DBG] run_subfinder failed."; exit 1; }
+# Perform a check before running ShuffleDNS and continue, otherwise skip it.
+if check_before_run shuffledns "$shuffledns_out"; then
+    run_shuffledns
+fi
 
-# Configure and sun ShuffleDNS
-run_shuffledns || { echo "[DBG] run_shuffledns failed."; exit 1; }
-
-exit 0
 # Configure and run AlterX
-printf "\n[INF] This tool only creates permutations.\n"
+if check_before_run alterx "$alterx_out"; then
+    run_alterx
+fi
+exit 0
+
 # Configure and run DNSX
 
 # Configure and run ShuffleDNS
 
 # Configure and run Naabu
-printf "\n[WRN] This tool runs a ACTIVE and NOISY scan.\n"
 
 #### ------ Phase 2: Content Discovery ---- ####
 
 # Configure and run HTTPX
 
 # Configure and run Katana
-printf "\n[WRN] This tool runs a ACTIVE and NOISY scan.\n"
 
 # Consider run URLFinder with Katana to gather URLs from external sources
 
