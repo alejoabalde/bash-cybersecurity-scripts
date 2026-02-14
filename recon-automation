@@ -112,30 +112,27 @@ run_subfinder() {
   
     printf "\n[INF] Setting up Subfinder.\n"
     printf "[INF] This tool will run a passive scan.\n"
-    printf "[INF] It is highly recommended to populate Subfinder's config file: (~/.config/subfinder/provider-config.yaml) with API keys from various sources to enhance subdomain discovery.\n"
+    printf "[INF] It is highly recommended to populate Subfinder's config file with API keys to enhance subdomain discovery.\n"
+    printf "[INF] File: (~/.config/subfinder/provider-config.yaml)\n"
 
     while true; do
-        read -e -r -p "[!] Do you wish to configure it before running? (Y/n) " confirm
-        case "$confirm" in
-            [yY]*)
-                printf "[!] Please populate you config file and write YES when you are done.\n" 
-                while true; do
-                    read -e -r -p "Continue? " confirm
-                    if [[ "$confirm" =~ ^[yY][eE][sS]$ ]]; then
-                        break
-                    else
-                        printf "[!] Wrong option. Type YES to continue."
-                    fi
-                done
+        printf "\n[!] Do you wish to configure it before running?\n"
+        read -e -r -p "[OPT] Confirm (c) Skip step (s): " choice
+        
+        if [[ "$choice" =~ ^[cC]$ ]]; then
+            printf "[!] Populate it now and select continue when done.\n"
+            read -e -r -p "[OPT] Continue (c) Skip step (s): " add_choice
+            
+            if [[ "$add_choice" =~ ^[cC]$ ]]; then
                 break
-                ;;
-            [nN]*) 
-                printf "[!] Continuing..."
+            else
                 break
-                ;;
-            *) printf "[!] Wrong option. Select (y/n)" ;;
-        esac
-    done      
+            fi
+        else
+            printf "[INF] Skipping step.\n"
+            break
+        fi
+    done
 
     printf "\n####################################################################\n"
     printf "##################### Starting Subfinder ###########################\n"
@@ -145,7 +142,7 @@ run_subfinder() {
     
     if [[ $? -eq 0 ]]; then
         local findings=$(wc -l <"$subfinder_out")
-        printf "[INF] Subfinder done - $findings subdomains saved."
+        printf "[INF] Subfinder done - $findings subdomains saved.\n"
     else
         printf "[ERR] Subfinder failed."
         return 1
@@ -158,7 +155,17 @@ run_shuffledns() {
     local shuffledns_flags=(-d "$domain" -w "$wordlist" -r "$resolvers" -mode bruteforce -o "$shuffledns_out" -silent)
 
     printf "\n[INF] Setting up ShuffleDNS\n"
-    printf "[WRN] This tool runs a ACTIVE and NOISY scan.\n\n"
+    printf "[WRN] This tool runs a ACTIVE and NOISY scan.\n"
+    printf "[!] Please select Confirm to continue\n"
+    read -e -r -p "[OPT] Confirm (c) Skip step (s): " choice
+
+    if [[ "$choice" =~ ^[cC]$ ]]; then
+        true
+    else
+        printf "[INF] Skipping ShuffleDNS.\n\n"
+        return 0
+    fi
+
 
     printf "[INF] Shuffledns requires a list with public DNS resolvers and a bruteforcing wordlists for best results.\n"
     printf "      \n%s\n" "Recommended sources:"
@@ -167,27 +174,30 @@ run_shuffledns() {
     printf "   %s\n" "- AssetNote (Wordlists):  https://wordlists.assetnote.io"
     printf "\n[!] Download one and save it as resolvers.txt in your working directory.\n"
     printf "[!] Download one and save it as wordlist.txt in your working directory.\n\n"
-    printf "[!] Enter YES when you are done.\n"
-
+    printf "[!] Please select Confirm to continue\n"
+    
     while true; do
-        read -e -r -p "[!] Ready to continue? " confirm
-        if [[ "$confirm" =~ ^[yY][eE][sS]$ ]]; then
-            if [[ ! -f "$wordlist" || ! -f "$resolvers" ]]; then
-                printf "[ERR] Missing files! Ensure both wordlist.txt and resolvers.txt exist.\n"
-                continue
-            else
+        read -e -r -p "[OPT] Confirm (c) Skip step (s): " add_choice
+            if [[ "$add_choice" =~ ^[cC]$ ]]; then
+                if [[ ! -f "$wordlist" || ! -f "$resolvers" ]]; then
+                    printf "[ERR] Missing files! Ensure both wordlist.txt and resolvers.txt exist.\n"
+                    continue
+                else
+                    break
+                fi
+            elif [[ "$add_choice" =~ ^[sS]$ ]]; then
+                printf "[INF] Skipping step.\n"
                 break
+            else
+                printf "[ERR] Wrong option.\n"
+                continue
             fi
-        else
-            continue
-        fi
     done
 
     printf "\n###############################################################\n"
     printf "##################### Starting ShuffleDNS #####################\n"
     printf "###############################################################\n"
 
-    printf "\n[INF] Starting ShuffleDNS\n"
     shuffledns "${shuffledns_flags[@]}" &>/dev/null
 
     if [[ $? -eq 0 ]]; then
@@ -199,8 +209,6 @@ run_shuffledns() {
     fi
 }
 
-
-# Configure AlterX
 run_alterx() {
     local keywords_file="${PWD}/target-keywords.txt"
     local alterx_flags=("-silent" "-enrich" "-o" "$alterx_out")
@@ -210,8 +218,8 @@ run_alterx() {
 
     # Sort by uniqueness into a single file
     if [[ -s "$subfinder_out" && -s "$shuffledns_out" ]]; then
-        sort -u "$subfinder_out" "$shuffledns_out" > combined_subs.txt
-        file_input="combined_subs.txt"
+        sort -u "$subfinder_out" "$shuffledns_out" > "${domain}/sorted_subfinder_shuffledns.txt"
+        file_input="${domain}/sorted_subfinder_shuffledns.txt"
     elif [[ -s "$subfinder_out" ]]; then
         printf "[WRN] ShuffleDNS results missing. Using Subfinder output only.\n"
         file_input="$subfinder_out"
@@ -224,22 +232,24 @@ run_alterx() {
     fi
 
     # Add target keywords
-    printf "[INF] It is highly recommended to add target specific keywords (company products, acronyms, brands, language specific terms) to enhance results.\n"
-    read -e -r -p "[!] Do you wish to add any? (Y/n): " add_choice
+    printf "[INF] It is recommended to add target specific keywords to enhance results.\n"
+    printf "[INF] : company products, acronyms, brands, language specific terms\n"
+    printf "[!] Do you wish to add any?\n"
+    read -e -r -p "[OPT] Add now (a) Skip action (s): " add_choice
 
-    if [[ "$add_choice" =~ ^[yY]$ ]]; then
+    if [[ "$add_choice" =~ ^[aA]$ ]]; then
         while true; do
             printf "[!] create a file named target-keywords.txt containing a keyword per line.\n"
-            read -e -r -p "[OPT] Continue (c) or Skip addition (s): " loop_choice
+            read -e -r -p "[OPT] Continue (c) or Skip action (s): " loop_choice
             if [[ "$loop_choice" =~ ^[cC]$ ]]; then
                 if [[ -s "$keywords_file" ]]; then
                     alterx_flags+=("-pp" "word=$keywords_file")
                     break
                 else
-                    printf "[ERR] File not found or empty.\n"
+                    printf "[ERR] File target-keywords.txt not found or empty.\n"
                 fi
             elif [[ "$loop_choice" =~ ^[sS]$ ]]; then
-                printf "[INF] Skipping keyword addition.\n"
+                printf "[INF] Skipping action.\n"
                 break
             fi
         done
@@ -250,8 +260,6 @@ run_alterx() {
     printf "#####################   Starting Alterx   #####################\n"
     printf "###############################################################\n"
 
-    printf "\n[INF] Starting AlterX\n"
- 
     cat "$file_input" | alterx "${alterx_flags[@]}" &> /dev/null
     
     if [[ $? -eq 0 ]]; then
@@ -266,40 +274,52 @@ run_alterx() {
     sort -u "$alterx_out" > "$alterx_sorted" 
   }
 
-# Run DNSX
 run_dnsx() {
-# dnsx -l permuted_subdomains.txt  -silent -a -aaaa -cname -resp -resp-only -o resolved.txt -json -r resolvers.txt -t 100-250 -retry 3 -wd "$domain" -wt 5
     local dnsx_flags=(-l "$alterx_sorted" -silent -a -aaaa -cname -resp-only -json -r resolvers.txt)
-    local dnsx_flags+=( -t 150 -retry 3 -o "$dnsx_out")
+    local dnsx_flags+=( -t 150 -retry 3 -o "$dnsx_out_json")
     
     printf "\n###############################################################\n"
-    printf "#####################    Starting DNSX    #####################\n"
+    printf "#####################    Starting dnsx    #####################\n"
     printf "###############################################################\n"
 
     printf "\n[INF] This an ACTIVE and NOISY step.\n"
-    printf "[!] Please select Confirm to continue\n"
+    printf "[!] Select Confirm to start.\n"
     read -e -r -p "[OPT] Confirm (c) Skip step (s): " choice
     
     if [[ "$choice" =~ ^[cC]$ ]]; then
-    dnsx "${dnsx_flags[@]}" &> /dev/null
+        printf "\n[INF] Starting dnsx. This will take a while.\n"
     else
         printf "[INF] Canceling action.\n"
         return 1
     fi
 
-   
-#   [INF] dnsx complete — 1,247 resolved hosts
-#     • 1,120 with A/AAAA records
-#     • 89 with CNAME (potential takeovers?)
-#   Sample: api.test.com → 192.0.2.1 | alias.test.com
-    if [[ $? -eq 0 ]]; then
-        local findings=$(wc -l < "$dnsx_out")
-        printf "\n[INF] dnsx complete - $findings resolved hosts.\n"
+########################## OUTPUT #########################
+#[INF] dnsx complete — 1247 resolved hosts
+#[+] 1120 with A/AAAA records
+#[+] 89 with CNAME (potential takeovers?)
+#Sample:
+#       api.domain.com → 192.0.2.1 | alias.domain.com
+###########################################################
+
+    dnsx "${dnsx_flags[@]}" &> /dev/null
+
+    if [[ $? -eq 0 && -s "$dnsx_out_json" ]]; then
+        local resolved_hosts=$(jq -c 'select(.host != null and (.a + .aaaa + .cname | length > 0))' "$dnsx_out_json" | wc -l)
+        local resolved_a_aaaa=$(jq -c 'select((.a | length > 0) or (.aaaa | length > 0))' "$dnsx_out_json" | wc -l)
+        local resolved_cname=$(jq -c 'select(.cname | length > 0)' "$dnsx_out_json" | wc -l)
+        local resolved_sample=$(head -n 200 "$dnsx_out_json" | jq -r '
+        select(.host != null and (.a[0] != null or .aaaa[0] != null) and .cname[0] != null) | "\(.host)\t->\t\((.a[0] // .aaaa[0]))\t|\t\(.cname[0])"
+        ' | head -n 5 | column -t -s $'\t' | sed 's/^/       /')
+
+        printf "[INF] dnsx done - %s resolved hosts.\n" "$resolved_hosts"
+        printf " [+] %s with A/AAAA records.\n" "$resolved_a_aaaa"
+        printf " [+] %s with CNAME (potential takeovers?)\n" "$resolved_cname"
+        printf "Sample: \n%s\n" "$resolved_sample"
     else
-        printf "[ERR] DNSX failed."
+        printf "\n[INF] No resolved hosts found.\n"
+        printf "[ERR] dnsx failed.\n"
         return 1
     fi
-
 }
 
 # Run Naabu
@@ -393,7 +413,7 @@ if check_before_run alterx "$alterx_out"; then
 fi
 
 # Configure and run DNSX
-if check_before_run dnsx "$dnsx_out"; then
+if check_before_run dnsx "$dnsx_out_json"; then
     run_dnsx
 fi
 
