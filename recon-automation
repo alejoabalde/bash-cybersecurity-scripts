@@ -5,13 +5,7 @@ set -euo pipefail
 ### Global settings ###
 domain=""
 output_dir=""
-
-
-
-### Configuration ###
 pd_tools=("subfinder" "shuffledns" "alterx" "dnsx" "naabu" "httpx" "katana" "urlfinder" "nuclei")
-
-
 
 
 ### Functions ###
@@ -74,6 +68,9 @@ define_variables() {
     # Defines the tool_out variable that will be used for each tool
     for tool in "${pd_tools[@]}"; do
         declare -g "${tool}_out=${clean_name}/${tool}_${clean_name}.txt"
+        declare -g "${tool}_out_json=${clean_name}/${tool}_${clean_name}.json"
+        declare -g "${tool}_sorted=${clean_name}/sorted_${tool}_${clean_name}.txt"
+        declare -g "${tool}_sorted_json=${clean_name}/sorted_${tool}_${clean_name}.json"
     done
 }
 
@@ -206,14 +203,14 @@ run_shuffledns() {
 # Configure AlterX
 run_alterx() {
     local keywords_file="${PWD}/target-keywords.txt"
-    local alterx_flags=("-enrich" "-o" "$alterx_out")
+    local alterx_flags=("-silent" "-enrich" "-o" "$alterx_out")
     local file_input=""
 
     printf "\n[INF] Setting up AlterX\n"
 
     # Sort by uniqueness into a single file
     if [[ -s "$subfinder_out" && -s "$shuffledns_out" ]]; then
-        cat "$subfinder_out" "$shuffledns_out" | sort -u > combined_subs.txt
+        sort -u "$subfinder_out" "$shuffledns_out" > combined_subs.txt
         file_input="combined_subs.txt"
     elif [[ -s "$subfinder_out" ]]; then
         printf "[WRN] ShuffleDNS results missing. Using Subfinder output only.\n"
@@ -236,7 +233,6 @@ run_alterx() {
             read -e -r -p "[OPT] Continue (c) or Skip addition (s): " loop_choice
             if [[ "$loop_choice" =~ ^[cC]$ ]]; then
                 if [[ -s "$keywords_file" ]]; then
-                    # CORRECTED: Append flag as separate elements
                     alterx_flags+=("-pp" "word=$keywords_file")
                     break
                 else
@@ -257,7 +253,7 @@ run_alterx() {
     printf "\n[INF] Starting AlterX\n"
  
     cat "$file_input" | alterx "${alterx_flags[@]}" &> /dev/null
-
+    
     if [[ $? -eq 0 ]]; then
         local findings=$(wc -l < "$alterx_out")
         printf "\n[INF] AlterX done - $findings permutations saved.\n"
@@ -266,20 +262,61 @@ run_alterx() {
         return 1
     fi
 
+    # Final sort to prevent duplications in big scopes
+    sort -u "$alterx_out" > "$alterx_sorted" 
   }
 
 # Run DNSX
-#run_dnsx() {}
+run_dnsx() {
+# dnsx -l permuted_subdomains.txt  -silent -a -aaaa -cname -resp -resp-only -o resolved.txt -json -r resolvers.txt -t 100-250 -retry 3 -wd "$domain" -wt 5
+    local dnsx_flags=(-l "$alterx_sorted" -silent -a -aaaa -cname -resp-only -json -r resolvers.txt)
+    local dnsx_flags+=( -t 150 -retry 3 -o "$dnsx_out")
+    
+    printf "\n###############################################################\n"
+    printf "#####################    Starting DNSX    #####################\n"
+    printf "###############################################################\n"
+
+    printf "\n[INF] This an ACTIVE and NOISY step.\n"
+    printf "[!] Please select Confirm to continue\n"
+    read -e -r -p "[OPT] Confirm (c) Skip step (s): " choice
+    
+    if [[ "$choice" =~ ^[cC]$ ]]; then
+    dnsx "${dnsx_flags[@]}" &> /dev/null
+    else
+        printf "[INF] Canceling action.\n"
+        return 1
+    fi
+
+   
+#   [INF] dnsx complete — 1,247 resolved hosts
+#     • 1,120 with A/AAAA records
+#     • 89 with CNAME (potential takeovers?)
+#   Sample: api.test.com → 192.0.2.1 | alias.test.com
+    if [[ $? -eq 0 ]]; then
+        local findings=$(wc -l < "$dnsx_out")
+        printf "\n[INF] dnsx complete - $findings resolved hosts.\n"
+    else
+        printf "[ERR] DNSX failed."
+        return 1
+    fi
+
+}
 
 # Run Naabu
 #run_naabu() {printf "\n[WRN] This tool runs a ACTIVE and NOISY scan.\n"}
+# User JSON output
 
 
 # Run HTTPX
 #run_httpx() {}
+# Use JSON output.
 
 # Run Katana
 #run_katana() {printf "\n[WRN] This tool runs a ACTIVE and NOISY scan.\n"}
+# Use JSON output.
+
+# Run URLFinder
+# Use JSON output
 
 # Generate report
 #generate_report() {}
@@ -321,6 +358,7 @@ for task in "${install_tools[@]}"; do
         "tools")
             install_script_tools
             ;;
+
     esac
 done
 
@@ -353,9 +391,11 @@ fi
 if check_before_run alterx "$alterx_out"; then
     run_alterx
 fi
-exit 0
 
 # Configure and run DNSX
+if check_before_run dnsx "$dnsx_out"; then
+    run_dnsx
+fi
 
 # Configure and run ShuffleDNS
 
