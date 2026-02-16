@@ -111,6 +111,7 @@ run_subfinder() {
     local subfinder_flags=(-d "$domain" -all -o "$subfinder_out" -silent)
   
     printf "\n[INF] Setting up Subfinder.\n"
+    printf " [+] Discover subdomains for a given target domain.\n"
     printf "[INF] This tool will run a passive scan.\n"
     printf "[INF] It is highly recommended to populate Subfinder's config file with API keys to enhance subdomain discovery.\n"
     printf "[INF] File: (~/.config/subfinder/provider-config.yaml)\n"
@@ -155,6 +156,7 @@ run_shuffledns() {
     local shuffledns_flags=(-d "$domain" -w "$wordlist" -r "$resolvers" -mode bruteforce -o "$shuffledns_out" -silent)
 
     printf "\n[INF] Setting up ShuffleDNS\n"
+    printf " [+] Brute-force subdomains that may not be found through passive enumeration.\n"
     printf "[WRN] This tool runs a ACTIVE and NOISY scan.\n"
     printf "[!] Please select Confirm to continue\n"
     read -e -r -p "[OPT] Confirm (c) Skip step (s): " choice
@@ -259,6 +261,7 @@ run_alterx() {
     printf "\n###############################################################\n"
     printf "#####################   Starting Alterx   #####################\n"
     printf "###############################################################\n"
+    printf "\n [+] Generate permutations of subdomains to identify additional assets\n"
 
     cat "$file_input" | alterx "${alterx_flags[@]}" &> /dev/null
     
@@ -281,8 +284,8 @@ run_dnsx() {
     printf "\n###############################################################\n"
     printf "#####################    Starting dnsx    #####################\n"
     printf "###############################################################\n"
-
-    printf "\n[INF] This an ACTIVE and NOISY step.\n"
+    printf "\n [+] Verify which subdomains resolve to valid hosts.\n"
+    printf "[INF] This an ACTIVE and NOISY step.\n"
     printf "[!] Select Confirm to start.\n"
     read -e -r -p "[OPT] Confirm (c) Skip step (s): " choice
     
@@ -292,14 +295,6 @@ run_dnsx() {
         printf "[INF] Canceling action.\n"
         return 1
     fi
-
-########################## OUTPUT #########################
-#[INF] dnsx complete — 1247 resolved hosts
-#[+] 1120 with A/AAAA records
-#[+] 89 with CNAME (potential takeovers?)
-#Sample:
-#       api.domain.com → 192.0.2.1 | alias.domain.com
-###########################################################
 
     dnsx "${dnsx_flags[@]}" &> /dev/null
 
@@ -316,20 +311,163 @@ run_dnsx() {
         printf " [+] %s with CNAME (potential takeovers?)\n" "$resolved_cname"
         printf "Sample: \n%s\n" "$resolved_sample"
     else
-        printf "\n[INF] No resolved hosts found.\n"
         printf "[ERR] dnsx failed.\n"
         return 1
     fi
+
+    # Create a cleartext sorted file for input
+    jq -r 'select((.a | length > 0) or (.aaaa | length > 0) or (.cname | length > 0)) | .host' "$dnsx_out_json" | sort -u > "$dnsx_out_sorted"
 }
 
 # Run Naabu
-#run_naabu() {printf "\n[WRN] This tool runs a ACTIVE and NOISY scan.\n"}
-# User JSON output
+run_naabu() {
+    local naabu_flags=(-top-ports 1000 -rate 1000 -c 25 -warm-up-time 2 -retries 2 -timeout 3000 -exclude-cdn -sV -silent -stats -json -o "$naabu_out_json")
+    
+    printf "\n###############################################################\n"
+    printf "#####################    Starting naabu    #####################\n"
+    printf "###############################################################\n"
+    printf "\n [+] Identify open ports on resolved hosts to find additional applications.\n"
+    printf "[INF] This an ACTIVE and NOISY step.\n"
+    printf "[!] Select Confirm to start.\n"
+    read -e -r -p "[OPT] Confirm (c) Skip step (s): " choice
 
+    if [[ "$choice" =~ ^[cC]$ ]]; then
+        printf "\n[INF] Starting naabu. This will take a while.\n"
+    else
+        printf "[INF] Canceling action.\n"
+        return 1
+    fi
+
+     cat "$dnsx_out_sorted" | naabu "${naabu_flags[@]}" &> /dev/null 
+
+##########################################################
+#- Hosts Processed    : 247 hosts
+#- Open Ports         : 1834
+#- Unique Services    : 23
+#- Top Ports          : 80 (156), 443 (142), 8080 (89)
+##########################################################
+    if [[ $? -eq 0 && -s "$naabu_out_json" ]]; then
+        local hosts=$(jq -r '.host' "$naabu_out_json" | sort -u | wc -l)
+        local ports=$(jq -r '.port' "$naabu_out_json" | wc -l)
+        local unique=$(jq -r '.port' "$naabu_out_json" | sort -u | wc -l)
+        local top=$(jq -r '.port' "$naabu_out_json" | sort | uniq -c | sort -rn | head -3 | awk '{printf "%s (%s), ", $2, $1}')
+
+        printf "[INF] Naabu done.\n"
+        printf " [+] Hosts Processed: %s hosts\n" "$hosts"
+        printf " [+] Open Ports: %s\n" "$ports"
+        printf " [+] Unique Services: %s\n" "$unique"
+        printf " [+] Top Ports: %s\n" "${top%, }"
+    else
+        printf "[ERR] Naabu failed.\n"
+        return 1
+    fi
+
+    # Create a cleartext file for input
+    jq -r '.host + ":" + (.port | tostring)' "$naabu_out_json" > "$naabu_out"
+}
 
 # Run HTTPX
-#run_httpx() {}
-# Use JSON output.
+run_httpx() {
+    local options=("Quick Discovery (Fast Triage)" "Technology Fingerprinting" "Deep Enumeration (Comprehensive)" "Screenshot & Hash (Visual Analysis)")
+    local options+=( "Custom Headers & Paths (Attack Surface)" "Stealth Mode (Low Noise)" "Too Much Options (go for Default)")
+
+    printf "\n[INF] Setting up httpX\n"
+    printf " [+] Gather metadata about hosts and ports.\n"
+    printf "\n[WRN] This tool runs a ACTIVE and NOISY scan.\n"
+    printf " [!] Please select Confirm to continue\n"
+    read -e -r -p "[OPT] Confirm (c) Skip step (s): " choice
+
+    if [[ "$choice" =~ ^[cC]$ ]]; then
+        true
+    else
+        printf "[INF] Skipping HttpX.\n\n"
+        return 0
+    fi
+
+    while true; do
+    local PS3="[!] Select the option that fits you best: "
+        select opt in "${options[@]}"; do
+            case $opt in
+                "Quick Discovery (Fast Triage)")
+                    local flags=(-silent -status-code -title -content-length -follow-redirects -location -mc 200,201,204,301,302,307,308,401,403,405)
+                    local flags+=( -json -o "$httpx_out_json")
+                    printf "\n[INF] You choose: Quick Discovery (Fast Triage)\n"
+                    break
+                    ;;
+                "Technology Fingerprinting")
+                    local flags=(-silent -status-code -title -tech-detect -server -content-type -follow-redirects -json -o "$httpx_out_json")
+                    printf "\n[INF] You choose: Technology Fingerprinting\n"
+                    break
+                    ;;
+                "Deep Enumeration (Comprehensive)")
+                    local flags=(-silent -status-code -title -content-length -tech-detect -server -method -websocket -ip -cname -cdn -location)
+                    local flags+=( -follow-redirects -response-time -json -threads 50 -rate-limit 150 -o "$httpx_out_json")
+                    printf "\n[INF] You choose: Deep Enumeration (Comprehensive)\n"
+                    break
+                    ;;
+                "Screenshot & Hash (Visual Analysis)")
+                    local flags=(-silent -status-code -title -screenshot -favicon -hash md5 -follow-redirects -json -o "$httpx_out_json")
+                    printf "\n[INF] You choose: Screenshot & Hash (Visual Analysis)\n"
+                    break
+                    ;;
+                "Custom Headers & Paths (Attack Surface)")
+                    local flags=(-silent -status-code -title -path /admin,/api,/graphql,/.git,/debug -header "User-Agent: Mozilla/5.0" -follow-redirects)
+                    local flags+=( -mc 200,403,401,500 -json -o "$httpx_out_json")
+                    printf "\n[INF] You choose: Custom Headers & Paths (Attack Surface)\n"
+                    break
+                    ;;
+                "Stealth Mode (Low Noise)")
+                    local flags=(-status-code -title -follow-redirects -random-agent -rate-limit 50 -threads 10 -timeout 10 -retries 1 -no-color)
+                    local flags+=( -silent -json -o "$httpx_out_json")
+                    printf "\n[INF] You choose: Stealth Mode (Low Noise)\n"
+                    break
+                    ;;
+                "Too Much Options (go for Default)")
+                    local flags=(-silent -status-code -title -content-length -follow-redirects -location -mc 200,201,204,301,302,307,308,401,403,405)
+                    local flags+=( -json -o "$httpx_out_json")
+                    printf "\n[INF] You choose: Information overload (Going for defaults)\n"
+                    break
+                    ;;
+                *) echo "Invalid choice $REPLY"
+                    continue
+                    ;;
+            esac
+        done
+
+        printf "\n [!] Please select Confirm to continue\n"
+        read -e -r -p "[OPT] Confirm (c) Select another option (s): " choice
+        if [[ "$choice" =~ ^[cC]$ ]]; then
+            break
+        else
+            continue
+        fi
+   done
+
+    printf "\n###############################################################\n"
+    printf "#####################   Starting HttpX    #####################\n"
+    printf "###############################################################\n"
+
+    cat "$naabu_out" | httpx "${flags[@]}" &> /dev/null
+
+    if [[ $? -eq 0 ]]; then
+    local total=$(jq -s 'if type == "array" then length else 1 end' "$httpx_out_json" 2>/dev/null || echo "0")
+    local success=$(jq -s '[.[] | select(.status_code == 200)] | length' "$httpx_out_json" 2>/dev/null || echo "0")
+    local titles=$(jq -s '[.[] | select(.title != null and .title != "")] | length' "$httpx_out_json" 2>/dev/null || echo "0")
+    local top_codes=$(jq -sr 'group_by(.status_code) | map({code: .[0].status_code, count: length}) | sort_by(-.count)[0:3] | map("\(.code) (\(.count))") | join(", ")' "$httpx_out_json" 2>/dev/null || echo "N/A")
+
+    printf "[INF] HttpX done.\n"
+    printf " [+] URLs Processed     : %s\n"  "$total"
+    printf " [+] Success (200)      : %s\n" "$success"
+    printf " [+] Pages with Titles  : %s\n" "$titles"
+    printf " [+] Top Status Codes   : %s\n" "$top_codes"
+    else
+        printf "[ERR] HttpX failed.\n"
+        return 1
+    fi
+
+    # Create a cleartext, sorted file for input
+    jq -r '.url' "$httpx_out_json" > "$httpx_sorted"
+}
 
 # Run Katana
 #run_katana() {printf "\n[WRN] This tool runs a ACTIVE and NOISY scan.\n"}
@@ -396,6 +534,7 @@ define_variables || { echo "[DBG] define_variables failed."; exit 1; }
 printf "\n####################################################################\n"
 printf "##################### Phase 1: Asset Discovery #####################\n"
 printf "####################################################################\n"
+printf "\n[+] Asset discovery focuses on identifying domains, subdomains, IP addresses, and open ports that can be targeted.\n"
 
 # Perform a check before running Subfinder and continue, otherwise skip it.
 if check_before_run subfinder "$subfinder_out"; then
@@ -417,14 +556,20 @@ if check_before_run dnsx "$dnsx_out_json"; then
     run_dnsx
 fi
 
-# Configure and run ShuffleDNS
-
 # Configure and run Naabu
-
+if check_before_run naabu "$naabu_out_json"; then
+    run_naabu
+fi
 #### ------ Phase 2: Content Discovery ---- ####
+printf "\n####################################################################\n"
+printf "#################### Phase 2: Content Discovery ####################\n"
+printf "####################################################################\n"
+printf "\n[+] Content discovery focuses on gathering actionable information from identified assets, such as URLs, endpoints, and application details.\n"
 
 # Configure and run HTTPX
-
+if check_before_run httpx "$httpx_out_json"; then
+    run_httpx
+fi
 # Configure and run Katana
 
 # Consider run URLFinder with Katana to gather URLs from external sources
