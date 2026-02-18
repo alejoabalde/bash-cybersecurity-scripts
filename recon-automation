@@ -141,12 +141,12 @@ run_subfinder() {
 
     subfinder "${subfinder_flags[@]}" &>/dev/null
     
-    if [[ $? -eq 0 ]]; then
+    if [[ $? -eq 0 && -s "$subfinder_out" ]]; then
         local findings=$(wc -l <"$subfinder_out")
         printf "[INF] Subfinder done - $findings subdomains saved.\n"
     else
-        printf "[ERR] Subfinder failed."
-        return 1
+        printf "[WRN] Subfinder completed, but no information was returned."
+        return 0
     fi
 }
 
@@ -202,12 +202,12 @@ run_shuffledns() {
 
     shuffledns "${shuffledns_flags[@]}" &>/dev/null
 
-    if [[ $? -eq 0 ]]; then
+    if [[ $? -eq 0 && -s "$shufflends_out" ]]; then
         local findings=$(wc -l < "$shuffledns_out")
         printf "\n[INF] ShuffleDNS done - $findings subdomains saved.\n"
     else
-        printf "[ERR] ShuffleDNS failed."
-        return 1
+        printf "[WRN] ShuffleDNS completed, but no information was returned."
+        return 0
     fi
 }
 
@@ -269,8 +269,8 @@ run_alterx() {
         local findings=$(wc -l < "$alterx_out")
         printf "\n[INF] AlterX done - $findings permutations saved.\n"
     else
-        printf "[ERR] AlterX failed."
-        return 1
+        printf "[WRN] AlterX completed, but no information was returned."
+        return 0
     fi
 
     # Final sort to prevent duplications in big scopes
@@ -311,8 +311,8 @@ run_dnsx() {
         printf " [+] %s with CNAME (potential takeovers?)\n" "$resolved_cname"
         printf "Sample: \n%s\n" "$resolved_sample"
     else
-        printf "[ERR] dnsx failed.\n"
-        return 1
+        printf "[WRN] dnsx completed, but no information was returned.\n"
+        return 0
     fi
 
     # Create a cleartext sorted file for input
@@ -340,12 +340,6 @@ run_naabu() {
 
      cat "$dnsx_out_sorted" | naabu "${naabu_flags[@]}" &> /dev/null 
 
-##########################################################
-#- Hosts Processed    : 247 hosts
-#- Open Ports         : 1834
-#- Unique Services    : 23
-#- Top Ports          : 80 (156), 443 (142), 8080 (89)
-##########################################################
     if [[ $? -eq 0 && -s "$naabu_out_json" ]]; then
         local hosts=$(jq -r '.host' "$naabu_out_json" | sort -u | wc -l)
         local ports=$(jq -r '.port' "$naabu_out_json" | wc -l)
@@ -358,8 +352,8 @@ run_naabu() {
         printf " [+] Unique Services: %s\n" "$unique"
         printf " [+] Top Ports: %s\n" "${top%, }"
     else
-        printf "[ERR] Naabu failed.\n"
-        return 1
+        printf "[WRN] Naabu completed, but no information was returned.\n"
+        return 0
     fi
 
     # Create a cleartext file for input
@@ -449,7 +443,7 @@ run_httpx() {
 
     cat "$naabu_out" | httpx "${flags[@]}" &> /dev/null
 
-    if [[ $? -eq 0 ]]; then
+    if [[ $? -eq 0 && -s "$httpx_out_json" ]]; then
     local total=$(jq -s 'if type == "array" then length else 1 end' "$httpx_out_json" 2>/dev/null || echo "0")
     local success=$(jq -s '[.[] | select(.status_code == 200)] | length' "$httpx_out_json" 2>/dev/null || echo "0")
     local titles=$(jq -s '[.[] | select(.title != null and .title != "")] | length' "$httpx_out_json" 2>/dev/null || echo "0")
@@ -461,20 +455,176 @@ run_httpx() {
     printf " [+] Pages with Titles  : %s\n" "$titles"
     printf " [+] Top Status Codes   : %s\n" "$top_codes"
     else
-        printf "[ERR] HttpX failed.\n"
-        return 1
+        printf "[WRN] HttpX Completed, but no information was returned.\n"
+        return 0
     fi
 
     # Create a cleartext, sorted file for input
-    jq -r '.url' "$httpx_out_json" > "$httpx_sorted"
+    jq -r '.url' "$httpx_out_json" | sort -u > "$httpx_sorted"
 }
 
-# Run Katana
-#run_katana() {printf "\n[WRN] This tool runs a ACTIVE and NOISY scan.\n"}
-# Use JSON output.
-
 # Run URLFinder
-# Use JSON output
+run_urlfinder() {
+    local input="$1"
+    local flags=(-silent -timeout 10 -rate-limit 50 -jsonl -o "$urlfinder_out_json")
+
+    printf "\n[INF] Setting up URLFinder.\n"
+    printf " [+] Simplify and accelerate web asset discovery.\n"
+    printf "\n[INF] This tool will run a passive scan.\n"
+    printf " [!] Please select Confirm to continue\n"
+
+    read -e -r -p "[OPT] Confirm (c) Skip step (s): " choice
+
+    if [[ "$choice" =~ ^[cC]$ ]]; then
+        true
+    else
+        printf "[INF] Skipping URLFinder.\n\n"
+        return 0
+    fi
+
+    printf "\n###############################################################\n"
+    printf "#####################  Starting URLFinder  ####################\n"
+    printf "###############################################################\n"
+
+    cat "$httpx_sorted" | urlfinder "${flags[@]}"
+    
+    if [[ $? -eq 0 && -s "$urlfinder_out_json" ]]; then
+    local js=$(jq -s '[.[] | select(.url | test("\\.js(\\?|$)"))] | length' "$urlfinder_out_json")
+    local params=$(jq -s '[.[] | select(.url | contains("?"))] | length' "$urlfinder_out_json")
+    local interesting=$(jq -s '[.[] | select(.url | test("\\.(json|xml|yaml|env|config|bak|sql|log)"))] | length' "$urlfinder_out_json")
+
+    printf "[INF] URLFinder done.\n"
+    printf " [+] JavaScript Files   : %s\n" "$js"
+    printf " [+] URLs with Params   : %s\n" "$params"
+    printf " [+] Interesting Files  : %s\n" "$interesting"
+    else
+        printf "[WRN] URLFinder completed, but no information was returned.\n"
+        return 0
+    fi
+
+    # Clean output for httpx later
+    jq -r '.url' "$urlfinder_out_json" > "$urlfinder_out"
+ }
+
+# Run Katana
+run_katana() {
+#    Case 1: Fast Endpoint Discovery (Breadth)
+#    katana -jc -jsl -kf robotstxt,sitemapxml -d 3 -c 20 -p 100 -aff -ef css,png,jpg,jpeg,gif,svg,ico,woff,woff2 -silent -o katana_endpoints.txt
+
+#    Case 2: Deep JS Analysis (Depth)
+#    katana -jc -jsl -xhr -aff -d 5 -js-crawl -automatic-form-fill -form-extraction -field-scope <scope> -c 10 -p 50 -H "Cookie: session=<token>" -silent -jsonl -o katana_deep.jsonl
+
+#    Case 3: Authenticated Crawl (Session-Based)
+#    katana -jc -jsl -d 4 -xhr -aff -kf all -automatic-form-fill -H "Authorization: Bearer <token>" -H "Cookie: session=<cookie>" -known-files all -field-scope <scope> -c 15 -p 75 -silent -jsonl -o katana_auth.jsonl
+
+#Case4: (default - Case 1)
+
+    local options=("Fast Endpoint Discovery (Breadth)" "Deep JS Analysis (Depth)" "Authenticated Crawl (Session-Based)" "Default")
+    local auth_header=()
+    local sess_cookie=()
+
+    printf "\n[INF] Setting up Katana.\n"
+    printf " [+] Crawl websites to discover endpoints, JavaScript files, and other content.\n"
+    printf "\n[WRN] This tool runs a ACTIVE and NOISY scan.\n"
+    printf " [!] Please select Confirm to continue\n"
+    read -e -r -p "[OPT] Confirm (c) Skip step (s): " choice
+
+    if [[ "$choice" =~ ^[cC]$ ]]; then
+        true
+    else
+        printf "[INF] Skipping Katana.\n\n"
+        return 0
+    fi
+
+    while true; do
+    local PS3="[!] Select the option that fits you best: "
+        select opt in "${options[@]}"; do
+            case $opt in
+                "Fast Endpoint Discovery (Breadth)")
+                    local flags=(-jc -jsl -kf robotstxt,sitemapxml -d 3 -c 20 -p 100 -aff -ef css,png,jpg,jpeg,gif,svg,ico,woff,woff2 -silent)
+                    local flags+=( -o "$katana_out_json")
+                    printf "\n[INF] You choose: Fast Endpoint Discovery (Breadth)\n"
+                    break
+                    ;;
+                "Deep JS Analysis (Depth)")
+                    local flags=(-jc -jsl -xhr -aff -d 5 -js-crawl -automatic-form-fill -form-extraction -field-scope "$domain" -c 10 -p 50)
+                    local flags+=( -H "$auth_header" -silent -jsonl -o "$katana_out_json")
+                    printf "\n[INF] You choose: Deep JS Analysis (Depth)\n"
+                    break
+                    ;;
+                "Authenticated Crawl (Session-Based)")
+                    local flags=(-jc -jsl -d 4 -xhr -aff -kf all -automatic-form-fill -H "$auth_header" -H "$sess_cookie" -known-files all)
+                    local flags+=( -field-scope "$domain" -c 15 -p 75 -silent -jsonl -o "$katana_out_json")
+                    printf "\n[INF] You choose: Authenticated Crawl (Session-Based)\n"
+                    break
+                    ;;
+                "Default")
+                    local flags=(-jc -jsl -kf robotstxt,sitemapxml -d 3 -c 20 -p 100 -aff -ef css,png,jpg,jpeg,gif,svg,ico,woff,woff2 -silent)
+                    local flags+=( -o "$katana_out_json")
+                    printf "\n [INF] Going with defaults.\n"
+                    break
+                    ;;
+                *) echo "Invalid choice $REPLY"
+                    continue
+                    ;;
+            esac
+        done
+
+        printf "\n [!] Please select Confirm to continue\n"
+        read -e -r -p "[OPT] Confirm (c) Select another option (s): " choice
+        if [[ "$choice" =~ ^[cC]$ ]]; then
+            break
+        else
+            continue
+        fi
+   done
+
+    printf "\n###############################################################\n"
+    printf "#####################   Starting Katana   #####################\n"
+    printf "###############################################################\n"
+    
+    echo "[DEBUG] httpx_sorted: $httpx_sorted"
+    echo "[DEBUG] katana flags: ${flags[@]}"
+    echo "[DEBUG] auth_header: ${auth_header[@]}"
+    echo "[DEBUG] session_token: ${sess_cookie[@]}"
+    return 0
+    #cat "$httpx_sorted" | katana "${flags[@]}"
+
+    if [[ $? -eq 0 && -s "$httpx_out_json" ]]; then
+        local total=$(jq -s 'length' "$katana_jsonl_file")
+        local js=$(jq -s '[ .[] | select(.url | test("\\.js$|\\.mjs$"; "i")) ] | length' "$katana_out_json")
+        local params_urls=$(jq -s '[ .[] | select(.url | contains("?")) ] | length' "$katana_out_json")
+        local params_percent=$(awk "BEGIN {printf \"%.1f\", ($urls_with_params / $total_endpoints) * 100}" <<< "")
+        local ext=$(jq -r '.url | sub("^.*\\."; "")' "$katana_out_json" | awk 'NF {a[$0]++} END {for (i in a) print a[i], i}' | sort -nr | head -3)
+        local ext+=( | awk '{printf ".%s (%s), ", $2, $1}' | sed 's/, $//')
+        local samples=$(jq -r '.url' "$katana_out_json" | grep -E '\?|/admin|/api/|/debug|/config|/backup|token=|key=|pass=|secret=|id=' | head -5)
+        local samples+=( | tr '\n' '\n' | sed 's/^/  - /')
+
+        printf "[INF] Katana done.\n"
+        printf "[+] Total endpoints     : %s\n" "$total_endpoints"
+        printf "[+] JavaScript Files    : %s\n" "$js_files"
+        printf "[+] URLs with Params    : %s (%s%%)\n" "$urls_with_params" "$params_percent"
+        printf "[+] Interesting extensions (top 3): %s\n" "${interesting_ext:-none}"
+        printf "[+] Sample:\n%s\n" "${high_value_samples:-  - (none found)}"
+    else
+        printf "[WRN] Katana Completed, but no information was returned.\n"
+        return 0
+    fi
+
+    # Clean output for httpx later
+    jq -r '.url' "$katana_out_json" > "$katana_out"
+}
+
+# Clean, combine, and sort URLFinder + Katana output
+#     - Combine URLFinder and Katana results sorted by uniqueness
+#     jq -r '.url' urlfinder_output.json > urlfinder_urls.txt
+#     jq -r '.url' katana_output.json > katana_urls.txt
+#     cat urlfinder_urls.txt katana_urls.txt | sort -u
+
+
+# Run conservative httpx
+#       - httpx -status-code -title -content-length -follow-redirects -location -mc 200,201,204,301,302,307,308,401,403,405 -random-agent -rate-limit 100 -threads 25 -timeout 10 -retries 1 -silent -no-color -json -o "$httpx_out_json"
+
 
 # Generate report
 #generate_report() {}
@@ -560,19 +710,31 @@ fi
 if check_before_run naabu "$naabu_out_json"; then
     run_naabu
 fi
+
+# Configure and run HTTPX
+if check_before_run httpx "$httpx_out_json"; then
+    run_httpx
+fi
+
+
+
 #### ------ Phase 2: Content Discovery ---- ####
 printf "\n####################################################################\n"
 printf "#################### Phase 2: Content Discovery ####################\n"
 printf "####################################################################\n"
 printf "\n[+] Content discovery focuses on gathering actionable information from identified assets, such as URLs, endpoints, and application details.\n"
 
-# Configure and run HTTPX
-if check_before_run httpx "$httpx_out_json"; then
-    run_httpx
+
+# Configure and run URLFinder
+if check_before_run urlfinder "$urlfinder_out_json"; then
+    run_urlfinder "$httpx_sorted"
 fi
+
 # Configure and run Katana
 
-# Consider run URLFinder with Katana to gather URLs from external sources
+
+# Feed again to httpx again to remove dead URLs
+
 
 #### ------ Phase 3: Report Generation ------ ####
 
