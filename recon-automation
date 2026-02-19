@@ -7,7 +7,6 @@ domain=""
 output_dir=""
 pd_tools=("subfinder" "shuffledns" "alterx" "dnsx" "naabu" "httpx" "katana" "urlfinder" "nuclei")
 
-
 ### Functions ###
 
 install_script_tools() {
@@ -37,7 +36,6 @@ install_script_tools() {
 
 # Define domain and output directory if unspecified.
 define_variables() {
-    # Defines the domain if unspecified
     while [[ -z "$domain" ]]; do
         printf "\n[!] Please specify a domain: "
         read -e -r -p "" domain
@@ -65,7 +63,6 @@ define_variables() {
         printf "[INF] Output will be stored in directory: $output_dir\n"
     fi
 
-    # Defines the tool_out variable that will be used for each tool
     for tool in "${pd_tools[@]}"; do
         declare -g "${tool}_out=${clean_name}/${tool}_${clean_name}.txt"
         declare -g "${tool}_out_json=${clean_name}/${tool}_${clean_name}.json"
@@ -75,6 +72,7 @@ define_variables() {
 
     declare -g "httpx_2ndrun_out_json=${clean_name}/httpx_2ndrun_${clean_name}.json"
     declare -g  "httpx_final_in=${clean_name}/httpx_final_in.txt"
+    declare -g "report_file=$output_dir/report.md"
 }
 
 check_before_run() {
@@ -83,9 +81,9 @@ check_before_run() {
 
     if [[ -f "$tool_out" && -s "$tool_out" ]]; then
         echo -e "\n[WRN] $tool_name output already exists. File: $tool_out"
-        read -e -r -p "[OPT] Skip $tool_name (s), Overwrite File (o), or Backup File (b)? [S/o/b]: " choise
+        read -e -r -p "[OPT] Skip $tool_name (s), Overwrite File (o), or Backup File (b)? [S/o/b]: " choice
         
-        case "$choise" in
+        case "$choice" in
             [sS]*)
                 printf "[INF] Skipping $tool_name step.\n"
                 return 1
@@ -215,7 +213,7 @@ run_shuffledns() {
 
     shuffledns "${shuffledns_flags[@]}" &>/dev/null
 
-    if [[ $? -eq 0 && -s "$shufflends_out" ]]; then
+    if [[ $? -eq 0 && -s "$shuffledns_out" ]]; then
         local findings=$(wc -l < "$shuffledns_out")
         printf "\n[INF] ShuffleDNS done - $findings subdomains saved.\n"
     else
@@ -793,7 +791,81 @@ rerun_httpx() {
 } 
  
 # Generate report
-#generate_report() {}
+generate_report() {
+    local scan_date=$(date "+%Y-%m-%d %H:%M")
+
+    printf "\n[INF] Generating final report.\n"
+
+    cat << EOF > "$report_file"
+# Recon Report - $domain
+**Scan Date:** $scan_date
+**Output Directory:** $output_dir
+
+---
+## Executive Summary
+- Total subdomains discovered: $(wc -l < "$subfinder_out" 2>/dev/null || echo 0) (Subfinder) + $(wc -l < "$shuffledns_out" 2>/dev/null || echo 0) (Shuffledns)
+- Total resolved hosts: $(jq -s 'length' "$dnsx_out_json" 2>/dev/null || echo 0)
+- Total alive web assets (final httpx): $(jq -s 'length' "$httpx_2ndrun_out_json" 2>/dev/null || echo 0)
+- Total unique endpoints crawled: $(jq -s 'length' "$katana_out_json" 2>/dev/null || echo 0)
+
+## 1. Asset Discovery
+### Subdomains
+- Subfinder: $(wc -l < "$subfinder_out" 2>/dev/null || echo 0)
+- Shuffledns: $(wc -l < "$shuffledns_out" 2>/dev/null || echo 0)
+- AlterX permutations: $(wc -l < "$alterx_sorted" 2>/dev/null || echo 0)
+
+### DNS Resolution (dnsx)
+$(jq -s 'length' "$dnsx_out_json" 2>/dev/null || echo 0) resolved hosts
+- With A/AAAA records: $(jq -c 'select((.a | length > 0) or (.aaaa | length > 0))' "$dnsx_out_json" 2>/dev/null | wc -l || echo 0)
+- With CNAME (potential takeovers): $(jq -c 'select(.cname | length > 0)' "$dnsx_out_json" 2>/dev/null | wc -l || echo 0)
+
+### Ports (Naabu)
+- Hosts with open ports: $(jq -r '.host' "$naabu_out_json" 2>/dev/null | sort -u | wc -l || echo 0)
+- Unique open ports: $(jq -r '.port' "$naabu_out_json" 2>/dev/null | sort -u | wc -l || echo 0)
+- Unique open ports: $(jq -r '.port' "$naabu_out_json" 2>/dev/null | sort -u | wc -l || echo 0)
+
+## 2. Web Content Discovery
+### First httpx pass
+- Alive URLs: $(jq -s 'length' "$httpx_out_json" 2>/dev/null || echo 0)
+
+### URLFinder + Katana + Final httpx
+- Combined unique URLs fed to final httpx: $(wc -l < "$httpx_final_in" 2>/dev/null || echo 0)
+- Final alive assets: $(jq -s 'length' "$httpx_2ndrun_out_json" 2>/dev/null || echo 0)
+
+### Katana Deep Crawl
+$(cat << INNER
+- Total endpoints: $(jq -s 'length' "$katana_out_json" 2>/dev/null || echo 0)
+- JavaScript Files: $(jq -s '[.[] | select(.request.endpoint | test("\\.js$|\\.mjs$"; "i"))] | length' "$katana_out_json" 2>/dev/null || echo 0)
+- URLs with Params: $(jq -s '[.[] | select(.request.endpoint | contains("?"))] | length' "$katana_out_json" 2>/dev/null || echo 0)
+- Interesting extensions (top 3): $(jq -rs '[.[] | .request.endpoint | split("?")[0]] | .[]' "$katana_out_json" 2>/dev/null | grep -oE '\.[a-zA-Z0-9]+$' | awk 'NF {a[$0]++} END {for (i in a) print a[i], i}' | sort -nr | head -3 | awk '{printf ".%s (%s), ", $2, $1}' | sed 's/, $//' || echo "none")
+INNER
+)
+
+## 3. High-Value Findings
+**Potential Subdomain Takeovers (CNAMEs):**
+$(jq -r 'select(.cname | length > 0) | "\(.host) → \(.cname[0])"' "$dnsx_out_json" 2>/dev/null | head -10 || echo "None detected")
+
+**High-Interest Endpoints (from Katana + Urlfinder):**
+$(jq -r '.request.endpoint' "$katana_out_json" 2>/dev/null | grep -E '\?|/admin|/api/|/debug|/config|/backup|token=|key=|pass=|secret=' | head -15 || echo "None found")
+
+## 4. File Locations
+- All raw outputs: $output_dir/
+- Final clean URLs: $httpx_final_in
+- Full report: $report_file
+- Final clean URLs: $httpx_final_in
+- Full report: $report_file
+
+## 5. Next Steps & Recommendations
+- Manual review of CNAME takeovers and parameter-heavy endpoints
+- Add API keys to Subfinder config for better results next run
+
+---
+Generated by Bash Recon Automation Tool
+EOF
+
+    printf "[INF] Report generated: %s\n" "$report_file"
+    printf "[INF] Full scan completed successfully!\n"
+}
 
 ##################
 ### Main Logic ###
@@ -882,14 +954,11 @@ if check_before_run httpx "$httpx_out_json"; then
     run_httpx
 fi
 
-
-
 #### ------ Phase 2: Content Discovery ---- ####
 printf "\n####################################################################\n"
 printf "#################### Phase 2: Content Discovery ####################\n"
 printf "####################################################################\n"
 printf "\n[+] Content discovery focuses on gathering actionable information from identified assets, such as URLs, endpoints, and application details.\n"
-
 
 # Configure and run URLFinder
 if check_before_run urlfinder "$urlfinder_out_json"; then
@@ -909,4 +978,6 @@ fi
 #### ------ Phase 3: Report Generation ------ ####
 
 # Generate report
-
+if check_before_run report "$report_file"; then
+   generate_report
+fi 
