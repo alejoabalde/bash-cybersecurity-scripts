@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -uo pipefail
 
 ### Global settings ###
 domain=""
@@ -10,21 +10,16 @@ pd_tools=("subfinder" "shuffledns" "alterx" "dnsx" "naabu" "httpx" "katana" "url
 ### Functions ###
 
 install_script_tools() {
+    local missing_tools=()
+
     printf "\n[INF] Checking if required tools are installed...\n"
 
     for tool in "${pd_tools[@]}"; do
-        if command -v "$tool" &> /dev/null; then
-            printf "[INF] $tool is already installed.\n"
-            continue
-        else
-           printf "[WRN] $tool is not installed.\n"
-        fi
+        command -v "$tool" &> /dev/null && printf "[INF] %s is already installed.\n" "$tool" || missing_tools+=("$tool")
     done
 
-    printf "[INF] Installing required tools...\n"
-
-    (IFS=,
-    pdtm -i "${pd_tools[*]}" -igp)
+    [[ ${#missing_tools[@]} -eq 0 ]] && return 0
+    (IFS=,;pdtm -i "${pd_tools[*]}" -igp)
     
     if [[ $? -eq 0 ]]; then
         printf "\n[INF] All required tools were installed.\n"
@@ -36,42 +31,57 @@ install_script_tools() {
 
 # Define domain and output directory if unspecified.
 define_variables() {
-    while [[ -z "$domain" ]]; do
-        printf "\n[!] Please specify a domain: "
-        read -e -r -p "" domain
-        [[ -z  "$domain" ]] && printf "[ERR] $domain cannot be empty.\n"
-    done
+    if [[ -z "$domain" ]]; then
+        while true; do
+            read -e -r -p "[!] Please specify a domain: " domain
+            if [[ -z "$domain" ]]; then
+                printf "[ERR] Domain cannot be empty.\n"
+            elif [[ ! "$domain" =~ ^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+                printf "[ERR] Invalid domain syntax. Please enter a valid domain.\n"
+            else
+                break
+            fi
+        done
+    else
+        if [[ ! "$domain" =~ ^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+            printf "[ERR] Invalid domain provided via -d flag: %s\n" "$domain" >&2
+            exit 1
+        fi
+        printf "[INF] Using domain: %s\n" "$domain"
+    fi
     
-    # Defines the output directory if unspecified
     local strip_protocol="${domain#*://}"
     local strip_name="${strip_protocol#www.}"
     local clean_name="${strip_name%%/*}"
-
-    if [[ -n "$output_dir" && -d "$output_dir" ]]; then
-       printf "[INF] Using existing directory: $output_dir.\n"
-       return 0
-    fi
-
+    
+    # Default output_dir from domain name if not set
     if [[ -z "$output_dir" ]]; then
         output_dir="$clean_name"
+    fi
+    # Normalize: strip trailing slashes, resolve relative dots
+    output_dir="${output_dir%/}"
+    
+    if [[ "$output_dir" == *..* ]]; then
+    printf "[ERR] Output directory path must not contain '..': %s\n" "$output_dir" >&2
+    exit 1
     fi
 
     if [[ ! -d "$output_dir" ]]; then
         mkdir -p "./$output_dir"
-        printf "[INF] Output will be stored in directory: $output_dir.\n"
+        printf "[INF] Created directory: $output_dir.\n"
     else
-        printf "[INF] Output will be stored in directory: $output_dir\n"
+        printf "[INF] Using existing directory: $output_dir.\n"
     fi
 
     for tool in "${pd_tools[@]}"; do
-        declare -g "${tool}_out=${clean_name}/${tool}_${clean_name}.txt"
-        declare -g "${tool}_out_json=${clean_name}/${tool}_${clean_name}.json"
-        declare -g "${tool}_sorted=${clean_name}/sorted_${tool}_${clean_name}.txt"
-        declare -g "${tool}_sorted_json=${clean_name}/sorted_${tool}_${clean_name}.json"
+        declare -g "${tool}_out=$output_dir/${tool}_${clean_name}.txt"
+        declare -g "${tool}_out_json=$output_dir/${tool}_${clean_name}.json"
+        declare -g "${tool}_sorted=$output_dir/sorted_${tool}_${clean_name}.txt"
+        declare -g "${tool}_sorted_json=$output_dir/sorted_${tool}_${clean_name}.json"
     done
 
-    declare -g "httpx_2ndrun_out_json=${clean_name}/httpx_2ndrun_${clean_name}.json"
-    declare -g  "httpx_final_in=${clean_name}/httpx_final_in.txt"
+    declare -g "httpx_2ndrun_out_json=$output_dir/httpx_2ndrun_${clean_name}.json"
+    declare -g "httpx_final_in=$output_dir/httpx_final_in.txt"
     declare -g "report_file=$output_dir/report.md"
 }
 
@@ -93,15 +103,15 @@ check_before_run() {
                 return 0
                 ;;
             [bB]*)
-                local timestamp=$(date +"%Y%m%d_%H%M")
+                local timestamp; timestamp=$(date +"%Y%m%d_%H%M")
                 local backup_file="${tool_out}_${timestamp}.bak"
                 mv "$tool_out" "$backup_file"
                 printf "[INF] Moved existing results to: %s\n" "$backup_file"
                 return 0
                 ;;
             *) 
-                printf "[ERR] Invalid option. Skipping Subfinder step.\n"
-                return 0 
+                printf "[ERR] Invalid option. Skipping %s step.\n" "$tool_name"
+                return 1 
                 ;;
         esac
     fi
@@ -110,37 +120,17 @@ check_before_run() {
 
 run_subfinder() {
     local subfinder_flags=(-d "$domain" -all -o "$subfinder_out" -silent)
-  
+    local config_file="${HOME}/.config/subfinder/provider-config.yaml"
+
     printf "\n[INF] Setting up Subfinder.\n"
     printf " [+] Discover subdomains for a given target domain.\n"
     printf "[INF] This tool will run a passive scan.\n"
-    printf "[INF] It is highly recommended to populate Subfinder's config file with API keys to enhance subdomain discovery.\n"
-    printf "[INF] File: (~/.config/subfinder/provider-config.yaml)\n"
-    
-    while true; do
-        printf "\n[!] Do you wish to configure it before running?\n"
-        read -e -r -p "[OPT] Confirm (c) Skip step (s): " choice
-        
-        if [[ "$choice" =~ ^[cC]$ ]]; then
-            printf "[!] Populate it now and select continue when done.\n"
-            read -e -r -p "[OPT] Continue (c) Skip step (s): " add_choice
-            if [[ "$add_choice" =~ ^[cC]$ ]]; then
-                break
-            elif [[ "$add_choice" =~ ^[sS]$ ]]; then
-                printf "[INF] Skipping step.\n"
-                break
-            else
-                printf "[ERR] Wrong option.\n"
-                continue
-            fi
-        elif [[ "$choice" =~ ^[sS]$ ]]; then
-            printf "[INF] Skipping step.\n"
-            break
-        else
-            printf "[ERR] Wrong option.\n"
-            continue
-        fi
-    done
+    printf "[INF] It is recommended to add API keys to: %s\n" "$config_file"
+
+    read -e -r -p "[OPT] Open config file in editor before running? [y/N]: " choice
+    if [[ "$choice" =~ ^[yY]$ ]]; then
+        "${EDITOR:-nano}" "$config_file"
+    fi
 
     printf "\n####################################################################\n"
     printf "##################### Starting Subfinder ###########################\n"
@@ -231,8 +221,8 @@ run_alterx() {
 
     # Sort by uniqueness into a single file
     if [[ -s "$subfinder_out" && -s "$shuffledns_out" ]]; then
-        sort -u "$subfinder_out" "$shuffledns_out" > "${domain}/sorted_subfinder_shuffledns.txt"
-        file_input="${domain}/sorted_subfinder_shuffledns.txt"
+        sort -u "$subfinder_out" "$shuffledns_out" > "${output_dir}/sorted_subfinder_shuffledns.txt"
+        file_input="${output_dir}/sorted_subfinder_shuffledns.txt"
     elif [[ -s "$subfinder_out" ]]; then
         printf "[WRN] ShuffleDNS results missing. Using Subfinder output only.\n"
         file_input="$subfinder_out"
@@ -270,6 +260,7 @@ run_alterx() {
                 continue
             fi
         done
+        break
     elif [[ "$add_choice" =~ ^[sS]$ ]]; then
         printf "[INF] Skipping action.\n"
         break
@@ -291,17 +282,17 @@ run_alterx() {
         local findings=$(wc -l < "$alterx_out")
         printf "\n[INF] AlterX done - $findings permutations saved.\n"
     else
-        printf "[WRN] AlterX completed, but no information was returned."
+        printf "[WRN] AlterX completed, but no information was returned.\n"
         return 0
     fi
 
     # Final sort to prevent duplications in big scopes
     sort -u "$alterx_out" > "$alterx_sorted" 
-  }
+}
 
 run_dnsx() {
     local dnsx_flags=(-l "$alterx_sorted" -silent -a -aaaa -cname -resp-only -json -r resolvers.txt)
-    local dnsx_flags+=( -t 150 -retry 3 -o "$dnsx_out_json")
+    dnsx_flags+=( -t 150 -retry 3 -o "$dnsx_out_json")
     
     printf "\n###############################################################\n"
     printf "#####################    Starting dnsx    #####################\n"
@@ -406,8 +397,8 @@ run_httpx() {
     printf " [+] Gather metadata about hosts and ports.\n"
     printf "\n[WRN] This tool runs a ACTIVE and NOISY scan.\n"
    
-    while true; do
     local PS3="[!] Select the option that fits you best: "
+    while true; do
         select opt in "${options[@]}"; do
             case $opt in
                 "Quick Discovery (Fast Triage)")
@@ -455,8 +446,7 @@ run_httpx() {
                     continue
                     ;;
             esac
-        done
-
+        done    
         printf "\n [!] Please select Confirm to continue\n"
         read -e -r -p "[OPT] Confirm (c) Select another option (s): " choice
         if [[ "$choice" =~ ^[cC]$ ]]; then
@@ -464,7 +454,7 @@ run_httpx() {
         else
             continue
         fi
-   done
+    done
 
     printf "\n###############################################################\n"
     printf "#####################   Starting HttpX    #####################\n"
@@ -494,7 +484,6 @@ run_httpx() {
 
 # Run URLFinder
 run_urlfinder() {
-    local input="$1"
     local flags=(-silent -timeout 10 -rate-limit 50 -jsonl -o "$urlfinder_out_json")
 
     printf "\n[INF] Setting up URLFinder.\n"
@@ -527,7 +516,7 @@ run_urlfinder() {
 
 # Run Katana
 run_katana() {
-    local header="${domain}/auth_header.txt"
+    local header="${output_dir}/auth_header.txt"
     local flags=()
     local auth_available=false
     local options=("Fast Crawl (breadth-first, unauthenticated)" "Deep JS Analysis (authenticated if available)" )
@@ -572,7 +561,7 @@ run_katana() {
                 ;;
             "Session-Based Crawl (requires auth)")
                 if [[ "$auth_available" == false ]]; then
-                    printf "[ERR] This mode requires auth_header.txt. Place it in %s and re-run.\n" "$domain"
+                    printf "[ERR] This mode requires auth_header.txt. Place it in %s and re-run.\n" "$output_dir"
                     continue
                 fi
                 local auth_header=$( head -n 1 "$header")
@@ -629,7 +618,7 @@ rerun_httpx() {
     local flags=(-status-code -title -content-length -follow-redirects -location -mc 200,201,204,301,302,307,308,401,403,405)
     flags+=( -random-agent -rate-limit 100 -threads 25 -timeout 10 -retries 1 -silent -no-color -json -o "$httpx_2ndrun_out_json")
 
-    # Clean, combine, and sort URLFinder + Katana output. Unless they exists, then just combine.
+    # Clean, combine, and sort URLFinder + Katana output.
     if [[ ! -f "$urlfinder_out" ]] || [[ ! -s "$urlfinder_out" ]]; then
         jq -r '.url' "$urlfinder_out_json" 2>/dev/null > "$urlfinder_out"
     fi
@@ -716,7 +705,6 @@ $(jq -s 'length' "$dnsx_out_json" 2>/dev/null || echo 0) resolved hosts
 ### Ports (Naabu)
 - Hosts with open ports: $(jq -r '.host' "$naabu_out_json" 2>/dev/null | sort -u | wc -l || echo 0)
 - Unique open ports: $(jq -r '.port' "$naabu_out_json" 2>/dev/null | sort -u | wc -l || echo 0)
-- Unique open ports: $(jq -r '.port' "$naabu_out_json" 2>/dev/null | sort -u | wc -l || echo 0)
 
 ## 2. Web Content Discovery
 ### First httpx pass
@@ -746,8 +734,6 @@ $(jq -r '.request.endpoint' "$katana_out_json" 2>/dev/null | grep -E '\?|/admin|
 - All raw outputs: $output_dir/
 - Final clean URLs: $httpx_final_in
 - Full report: $report_file
-- Final clean URLs: $httpx_final_in
-- Full report: $report_file
 
 ## 5. Next Steps & Recommendations
 - Manual review of CNAME takeovers and parameter-heavy endpoints
@@ -769,8 +755,10 @@ EOF
 install_tools=()
 verbose=false
 
-while getopts ":i:vh" opt; do
+while getopts ":d:i:o:vh" opt; do
     case $opt in
+        d) domain="$OPTARG" ;;
+        o) output_dir="$OPTARG" ;;   # optional: also allow -o for output dir
         i)
             if [[ "$OPTARG" == "tools" ]]; then
                 install_tools+=("$OPTARG")
@@ -781,12 +769,21 @@ while getopts ":i:vh" opt; do
             ;;
         v) verbose=true ;;
         h)
-            echo "[!] Usage: $0 [-i tools] [-v verbose] [-h help]"
+            printf "Usage: %s [-d domain] [-o output_dir] [-i tools] [-v] [-h]\n" "$0"
+            printf "  -d  Target domain (e.g. example.com). Skips interactive prompt.\n"
+            printf "  -o  Output directory (default: derived from domain).\n"
+            printf "  -i  Install required tools (use: -i tools).\n"
+            printf "  -v  Enable verbose/trace mode.\n"
+            printf "  -h  Show this help.\n"
             exit 0
             ;;
-        *) 
-            echo "[!] Usage: $0 [-i tools] [-v verbose] [-h help]"
-            exit 0
+        :)
+            echo "[ERR] Option -$OPTARG requires an argument." >&2
+            exit 1
+            ;;
+        *)
+            echo "[!] Usage: $0 [-d domain] [-i tools] [-v] [-h]" >&2
+            exit 1
             ;;
     esac
 done
@@ -802,6 +799,7 @@ for task in "${install_tools[@]}"; do
     esac
 done
 
+# Verbosity will only trace the main flow
 [[ $verbose == true ]] && set -x
 
 #### ------ Phase 1: Asset Discovery ------ ####
@@ -820,7 +818,7 @@ printf "\n[+] Asset discovery focuses on identifying domains, subdomains, IP add
 
 # Perform a check before running Subfinder and continue, otherwise skip it.
 if check_before_run subfinder "$subfinder_out"; then
-    run_subfinder "$domain" "$output_dir" 
+    run_subfinder 
 fi
 
 # Perform a check before running ShuffleDNS and continue, otherwise skip it.
@@ -856,7 +854,7 @@ printf "\n[+] Content discovery focuses on gathering actionable information from
 
 # Configure and run URLFinder
 if check_before_run urlfinder "$urlfinder_out_json"; then
-    run_urlfinder "$httpx_sorted"
+    run_urlfinder 
 fi
 
 # Configure and run Katana
