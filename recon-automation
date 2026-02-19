@@ -5,7 +5,7 @@ set -euo pipefail
 ### Global settings ###
 domain=""
 output_dir=""
-pd_tools=("subfinder" "shuffledns" "alterx" "dnsx" "naabu" "httpx" "katana" "urlfinder" "nuclei")
+pd_tools=("subfinder" "shuffledns" "alterx" "dnsx" "naabu" "httpx" "katana" "urlfinder")
 
 ### Functions ###
 
@@ -116,7 +116,7 @@ run_subfinder() {
     printf "[INF] This tool will run a passive scan.\n"
     printf "[INF] It is highly recommended to populate Subfinder's config file with API keys to enhance subdomain discovery.\n"
     printf "[INF] File: (~/.config/subfinder/provider-config.yaml)\n"
-
+    
     while true; do
         printf "\n[!] Do you wish to configure it before running?\n"
         read -e -r -p "[OPT] Confirm (c) Skip step (s): " choice
@@ -172,11 +172,11 @@ run_shuffledns() {
         if [[ "$choice" =~ ^[cC]$ ]]; then
             break
         elif [[ "$choice" =~ ^[sS]$ ]]; then
-            printf "[INF] Skipping ShuffleDNS.\n\n"
+           printf "[INF] Skipping ShuffleDNS.\n\n"
             return 0
-        else
+       else
             printf "[ERR] Wrong option.\n"
-            continue
+           continue
         fi
     done
 
@@ -285,7 +285,7 @@ run_alterx() {
     printf "###############################################################\n"
     printf "\n [+] Generate permutations of subdomains to identify additional assets\n"
 
-    cat "$file_input" | alterx "${alterx_flags[@]}" &> /dev/null
+    alterx "${alterx_flags[@]}" < "$file_input" &> /dev/null
     
     if [[ $? -eq 0 ]]; then
         local findings=$(wc -l < "$alterx_out")
@@ -308,6 +308,7 @@ run_dnsx() {
     printf "###############################################################\n"
     printf "\n [+] Verify which subdomains resolve to valid hosts.\n"
     printf "[INF] This an ACTIVE and NOISY step.\n"
+
     printf "[!] Select Confirm to start.\n"
     
     while true; do
@@ -327,12 +328,12 @@ run_dnsx() {
     dnsx "${dnsx_flags[@]}" &> /dev/null
 
     if [[ $? -eq 0 && -s "$dnsx_out_json" ]]; then
-        local resolved_hosts=$(jq -c 'select(.host != null and (.a + .aaaa + .cname | length > 0))' "$dnsx_out_json" | wc -l)
-        local resolved_a_aaaa=$(jq -c 'select((.a | length > 0) or (.aaaa | length > 0))' "$dnsx_out_json" | wc -l)
-        local resolved_cname=$(jq -c 'select(.cname | length > 0)' "$dnsx_out_json" | wc -l)
+        local resolved_hosts=$(jq -c 'select(.host != null and (.a + .aaaa + .cname | length > 0))' "$dnsx_out_json" 2>/dev/null | wc -l)
+        local resolved_a_aaaa=$(jq -c 'select((.a | length > 0) or (.aaaa | length > 0))' "$dnsx_out_json" 2>/dev/null | wc -l)
+        local resolved_cname=$(jq -c 'select(.cname | length > 0)' "$dnsx_out_json" 2>/dev/null | wc -l)
         local resolved_sample=$(head -n 200 "$dnsx_out_json" | jq -r '
         select(.host != null and (.a[0] != null or .aaaa[0] != null) and .cname[0] != null) | "\(.host)\t->\t\((.a[0] // .aaaa[0]))\t|\t\(.cname[0])"
-        ' | head -n 5 | column -t -s $'\t' | sed 's/^/       /')
+        ' 2>/dev/null | head -n 5 | column -t -s $'\t' | sed 's/^/       /')
 
         printf "[INF] dnsx done - %s resolved hosts.\n" "$resolved_hosts"
         printf " [+] %s with A/AAAA records.\n" "$resolved_a_aaaa"
@@ -344,18 +345,20 @@ run_dnsx() {
     fi
 
     # Create a cleartext sorted file for input
-    jq -r 'select((.a | length > 0) or (.aaaa | length > 0) or (.cname | length > 0)) | .host' "$dnsx_out_json" | sort -u > "$dnsx_out_sorted"
+    jq -r 'select((.a | length > 0) or (.aaaa | length > 0) or (.cname | length > 0)) | .host' "$dnsx_out_json" 2>/dev/null | sort -u > "$dnsx_out_sorted"
 }
 
 # Run Naabu
 run_naabu() {
-    local naabu_flags=(-top-ports 1000 -rate 1000 -c 25 -warm-up-time 2 -retries 2 -timeout 3000 -exclude-cdn -sV -silent -stats -json -o "$naabu_out_json")
+    local naabu_flags=(-top-ports 1000 -rate 1000 -c 25 -warm-up-time 2 -retries 2 -timeout 3000 -exclude-cdn -sV -silent -stats)
+    naabu_flags+=( -json -o "$naabu_out_json")
     
     printf "\n###############################################################\n"
     printf "#####################    Starting naabu    #####################\n"
     printf "###############################################################\n"
     printf "\n [+] Identify open ports on resolved hosts to find additional applications.\n"
     printf "[INF] This an ACTIVE and NOISY step.\n"
+
     printf "[!] Select Confirm to start.\n"
     
     while true; do
@@ -372,13 +375,13 @@ run_naabu() {
         fi
     done
 
-     cat "$dnsx_out_sorted" | naabu "${naabu_flags[@]}" &> /dev/null 
+     naabu "${naabu_flags[@]}" < "$dnsx_out_sorted" &> /dev/null 
 
     if [[ $? -eq 0 && -s "$naabu_out_json" ]]; then
-        local hosts=$(jq -r '.host' "$naabu_out_json" | sort -u | wc -l)
-        local ports=$(jq -r '.port' "$naabu_out_json" | wc -l)
-        local unique=$(jq -r '.port' "$naabu_out_json" | sort -u | wc -l)
-        local top=$(jq -r '.port' "$naabu_out_json" | sort | uniq -c | sort -rn | head -3 | awk '{printf "%s (%s), ", $2, $1}')
+        local hosts=$(jq -r '.host' "$naabu_out_json" 2>/dev/null | sort -u | wc -l)
+        local ports=$(jq -r '.port' "$naabu_out_json" 2>/dev/null | wc -l)
+        local unique=$(jq -r '.port' "$naabu_out_json" 2>/dev/null | sort -u | wc -l)
+        local top=$(jq -r '.port' "$naabu_out_json" 2>/dev/null | sort | uniq -c | sort -rn | head -3 | awk '{printf "%s (%s), ", $2, $1}')
 
         printf "[INF] Naabu done.\n"
         printf " [+] Hosts Processed: %s hosts\n" "$hosts"
@@ -391,40 +394,25 @@ run_naabu() {
     fi
 
     # Create a cleartext file for input
-    jq -r '.host + ":" + (.port | tostring)' "$naabu_out_json" > "$naabu_out"
+    jq -r '.host + ":" + (.port | tostring)' "$naabu_out_json" 2>/dev/null > "$naabu_out"
 }
 
 # Run HTTPX
 run_httpx() {
     local options=("Quick Discovery (Fast Triage)" "Technology Fingerprinting" "Deep Enumeration (Comprehensive)" "Screenshot & Hash (Visual Analysis)")
-    local options+=( "Custom Headers & Paths (Attack Surface)" "Stealth Mode (Low Noise)" "Too Much Options (go for Default)")
+    options+=( "Custom Headers & Paths (Attack Surface)" "Stealth Mode (Low Noise)" "Too Much Options (go for Default)")
 
     printf "\n[INF] Setting up httpX\n"
     printf " [+] Gather metadata about hosts and ports.\n"
     printf "\n[WRN] This tool runs a ACTIVE and NOISY scan.\n"
-    printf " [!] Please select Confirm to continue\n"
-    
-    while true; do
-    read -e -r -p "[OPT] Confirm (c) Skip step (s): " choice
-        if [[ "$choice" =~ ^[cC]$ ]]; then
-            printf "\n[INF] Starting Httpx. This will take a while.\n"
-            break
-        elif [[ "$choice" =~ ^[sS]$ ]]; then
-            printf "[INF] Skipping Httpx.\n\n"
-            return 0
-        else
-            printf "[ERR] Wrong option.\n"
-            continue
-        fi
-    done
-
+   
     while true; do
     local PS3="[!] Select the option that fits you best: "
         select opt in "${options[@]}"; do
             case $opt in
                 "Quick Discovery (Fast Triage)")
                     local flags=(-silent -status-code -title -content-length -follow-redirects -location -mc 200,201,204,301,302,307,308,401,403,405)
-                    local flags+=( -json -o "$httpx_out_json")
+                    flags+=( -json -o "$httpx_out_json")
                     printf "\n[INF] You choose: Quick Discovery (Fast Triage)\n"
                     break
                     ;;
@@ -435,7 +423,7 @@ run_httpx() {
                     ;;
                 "Deep Enumeration (Comprehensive)")
                     local flags=(-silent -status-code -title -content-length -tech-detect -server -method -websocket -ip -cname -cdn -location)
-                    local flags+=( -follow-redirects -response-time -json -threads 50 -rate-limit 150 -o "$httpx_out_json")
+                    flags+=( -follow-redirects -response-time -json -threads 50 -rate-limit 150 -o "$httpx_out_json")
                     printf "\n[INF] You choose: Deep Enumeration (Comprehensive)\n"
                     break
                     ;;
@@ -446,19 +434,20 @@ run_httpx() {
                     ;;
                 "Custom Headers & Paths (Attack Surface)")
                     local flags=(-silent -status-code -title -path /admin,/api,/graphql,/.git,/debug -header "User-Agent: Mozilla/5.0" -follow-redirects)
-                    local flags+=( -mc 200,403,401,500 -json -o "$httpx_out_json")
+                    flags+=( -mc 200,403,401,500 -json -o "$httpx_out_json")
                     printf "\n[INF] You choose: Custom Headers & Paths (Attack Surface)\n"
                     break
                     ;;
                 "Stealth Mode (Low Noise)")
                     local flags=(-status-code -title -follow-redirects -random-agent -rate-limit 50 -threads 10 -timeout 10 -retries 1 -no-color)
-                    local flags+=( -silent -json -o "$httpx_out_json")
+                    flags+=( -silent -json -o "$httpx_out_json")
                     printf "\n[INF] You choose: Stealth Mode (Low Noise)\n"
                     break
                     ;;
                 "Too Much Options (go for Default)")
-                    local flags=(-silent -status-code -title -content-length -follow-redirects -location -mc 200,201,204,301,302,307,308,401,403,405)
-                    local flags+=( -json -o "$httpx_out_json")
+                    local flags=(-silent -status-code -title -content-length -tech-detect -server -follow-redirects )
+                    flags+=(-location -response-time -random-agent -mc 200,201,204,301,302,307,308,401,403,405 )
+                    flags+=(-threads 25 -rate-limit 100 -json -o "$httpx_out_json")
                     printf "\n[INF] You choose: Information overload (Going for defaults)\n"
                     break
                     ;;
@@ -481,7 +470,7 @@ run_httpx() {
     printf "#####################   Starting HttpX    #####################\n"
     printf "###############################################################\n"
 
-    cat "$naabu_out" | httpx "${flags[@]}" &> /dev/null
+    httpx "${flags[@]}" < "$naabu_out" &> /dev/null
 
     if [[ $? -eq 0 && -s "$httpx_out_json" ]]; then
     local total=$(jq -s 'if type == "array" then length else 1 end' "$httpx_out_json" 2>/dev/null || echo "0")
@@ -500,7 +489,7 @@ run_httpx() {
     fi
 
     # Create a cleartext, sorted file for input
-    jq -r '.url' "$httpx_out_json" | sort -u > "$httpx_sorted"
+    jq -r '.url' "$httpx_out_json" 2>/dev/null | sort -u > "$httpx_sorted"
 }
 
 # Run URLFinder
@@ -511,32 +500,17 @@ run_urlfinder() {
     printf "\n[INF] Setting up URLFinder.\n"
     printf " [+] Simplify and accelerate web asset discovery.\n"
     printf "\n[INF] This tool will run a passive scan.\n"
-    printf " [!] Please select Confirm to continue\n"
-    
-    while true; do
-    read -e -r -p "[OPT] Confirm (c) Skip step (s): " choice
-        if [[ "$choice" =~ ^[cC]$ ]]; then
-            printf "[INF] Starting URLFinder. This will take a while.\n"
-            break
-        elif [[ "$choice" =~ ^[sS]$ ]]; then
-            printf "[INF] Skipping URLFinder.\n\n"
-            return 0
-        else
-            printf "[ERR] Wrong option.\n"
-            continue
-        fi
-    done
 
     printf "\n###############################################################\n"
     printf "#####################  Starting URLFinder  ####################\n"
     printf "###############################################################\n"
 
-    cat "$httpx_sorted" | urlfinder "${flags[@]}" &> /dev/null
+    urlfinder "${flags[@]}" < "$httpx_sorted" &> /dev/null
     
     if [[ $? -eq 0 && -s "$urlfinder_out_json" ]]; then
-    local js=$(jq -s '[.[] | select(.url | test("\\.js(\\?|$)"))] | length' "$urlfinder_out_json")
-    local params=$(jq -s '[.[] | select(.url | contains("?"))] | length' "$urlfinder_out_json")
-    local interesting=$(jq -s '[.[] | select(.url | test("\\.(json|xml|yaml|env|config|bak|sql|log)"))] | length' "$urlfinder_out_json")
+    local js=$(jq -s '[.[] | select(.url | test("\\.js(\\?|$)"))] | length' "$urlfinder_out_json" 2>/dev/null)
+    local params=$(jq -s '[.[] | select(.url | contains("?"))] | length' "$urlfinder_out_json" 2>/dev/null)
+    local interesting=$(jq -s '[.[] | select(.url | test("\\.(json|xml|yaml|env|config|bak|sql|log)"))] | length' "$urlfinder_out_json" 2>/dev/null)
 
     printf "[INF] URLFinder done.\n"
     printf " [+] JavaScript Files   : %s\n" "$js"
@@ -548,170 +522,92 @@ run_urlfinder() {
     fi
 
     # Clean output for httpx later
-    jq -r '.url' "$urlfinder_out_json" > "$urlfinder_out"
+    jq -r '.url' "$urlfinder_out_json" 2>/dev/null > "$urlfinder_out"
  }
 
 # Run Katana
 run_katana() {
-    local options=("Fast Endpoint Discovery (Breadth)" "Deep JS Analysis (Depth)" "Authenticated Crawl (Session-Based)" "Default")
-    local header="auth_header.txt"
+    local header="${domain}/auth_header.txt"
     local flags=()
-    local auth_header=""
+    local auth_available=false
+    local options=("Fast Crawl (breadth-first, unauthenticated)" "Deep JS Analysis (authenticated if available)" )
+    options+=("Session-Based Crawl (requires auth)" "Skip")
 
     printf "\n[INF] Setting up Katana.\n"
     printf " [+] Crawl websites to discover endpoints, JavaScript files, and other content.\n"
     printf "\n[WRN] This tool runs a ACTIVE and NOISY scan.\n"
-    printf " [!] Please select Confirm to continue\n"
 
-    while true; do
-    read -e -r -p "[OPT] Confirm (c) Skip step (s): " choice
-        if [[ "$choice" =~ ^[cC]$ ]]; then
-            break
-        elif [[ "$choice" =~ ^[sS]$ ]]; then
-            printf "[INF] Skipping Katana.\n\n"
-            return 0
-        else
-            printf "[ERR] Wrong option.\n"
-            continue
-        fi
-    done
+    if [[ -f "$header" && -s "$header" ]]; then
+        auth_header=$(head -n 1 "$header")
+        auth_available=true
+        printf "[INF] Auth header found, authenticated modes available.\n"
+    else
+        printf "[WRN] No auth header found. To enable authenticated modes:\n"
+        printf "  1. Log into the target and copy your session/auth header\n"
+        printf "  2. Save it as a single line in: %s\n" "$header"
+        printf "  3. Re-run this step\n"
+        printf "  Continuing with unauthenticated modes only.\n"
+    fi
 
-    while true; do
-        local PS3="[!] Select the option that fits you best: "
-        select opt in "${options[@]}"; do
-            case $opt in
-                "Fast Endpoint Discovery (Breadth)")
-                    local flags=(-jc -jsl -kf robotstxt -kf sitemapxml -d 3 -c 20 -p 100 -aff -ef css,png,jpg,jpeg,gif,svg,ico,woff,woff2 -silent)
-                    flags+=( -jsonl -o "$katana_out_json")
-                    printf "\n[INF] You choose: Fast Endpoint Discovery (Breadth)\n"
-                    break ;;
-                "Deep JS Analysis (Depth)")
-                    printf "\n[INF] You choose: Deep JS Analysis (Depth)\n"
-                    while true; do
-                        printf "\n [!] It is highly recommended for you to use the target's authentication header,"
-                        printf " this will potentially bring more actionable results.\n"
-                        printf " [!] You can take some time to create an account and grab it, or skip and crawl without it.\n"
-                        read -e -r -p "[OPT] Continue with Auth (c) Run Unauthenticated (s): " add_choice
-                        if [[ "$add_choice" =~ ^[cC]$ ]]; then
-                            if [[ ! -f "$header" ]] || [[ ! -s "$header" ]]; then
-                                printf "[!] Please add auth_header.txt to the working directory, containing the full header in a single line.\n"
-                                while true; do
-                                    read -e -r -p "[OPT] Continue (c) skip (s): " new_choice
-                                    if [[ "$new_choice" =~ ^[cC]$ ]]; then
-                                        if [[ -f "$header" ]] && [[ -s "$header" ]]; then
-                                            printf "[INF] File: auth_header.txt found.\n"
-                                            local auth_header=$(head -n 1 "$header")
-                                            local flags=(-jc -jsl -xhr -aff -d 5 -js-crawl -automatic-form-fill -form-extraction -field-scope "$domain")
-                                            flags+=( -c 10 -p 50 -H \""$auth_header"\" -silent -jsonl -o "$katana_out_json")
-                                            printf "[INF] Continuing Authenticated.\n"
-                                            break 3
-                                        else
-                                            printf " [!] File: auth_header.txt was not found or is empty.\n"
-                                            continue
-                                        fi
-                                    elif [[ "$new_choice" =~ ^[sS]$ ]]; then
-                                        printf "[INF] Skipping option.\n"
-                                        break 2
-                                    else
-                                        printf "[ERR] Wrong option.\n"
-                                        continue
-                                    fi
-                                done
-                            else
-                                printf "[INF] auth_header.txt already exists.\n"
-                                local auth_header=$(head -n 1 "$header")
-                                local flags=(-jc -jsl -xhr -aff -d 5 -js-crawl -automatic-form-fill -form-extraction -field-scope "$domain")
-                                flags+=( -c 10 -p 50 -H \""$auth_header"\" -silent -jsonl -o "$katana_out_json")
-                                printf "[INF] Continuing Authenticated.\n"
-                                break 2
-                            fi
-                        elif [[ "$add_choice" =~ ^[sS]$ ]]; then
-                            printf "[INF] Running unauthenticated.\n"
-                            local flags=(-jc -jsl -xhr -aff -d 5 -js-crawl -automatic-form-fill -form-extraction -field-scope "$domain" -c 10 -p 50)
-                            flags+=( -silent -jsonl -o "$katana_out_json")
-                            break 2
-                        else
-                            printf "[ERR] Wrong option.\n"
-                            continue
-                        fi
-                    done
-                    ;;
-                "Authenticated Crawl (Session-Based)")
-                    printf "\n[INF] You choose: Authenticated Crawl (Session-Based)\n"
-                    if [[ ! -f "$header" ]] || [[ ! -s "$header" ]]; then
-                        printf " [!] Please add auth_header.txt to the working directory containing the full authentication header in a single line.\n"
-                        while true; do
-                            read -e -r -p "[OPT] Continue (c) Skip step (s): " add_choice
-                            if [[ "$add_choice" =~ ^[cC]$ ]]; then
-                                if [[ -f "$header" ]] && [[ -s "$header" ]]; then
-                                    printf "[INF] File: auth_header.txt found.\n"
-                                    local auth_header=$( head -n 1 "$header")
-                                    local flags=(-jc -jsl -d 4 -xhr -aff -kf all -automatic-form-fill -H \""$auth_header"\" -known-files all)
-                                    flags+=( -field-scope "$domain" -c 15 -p 75 -silent -jsonl -o "$katana_out_json")
-                                    printf "[INF] Continuing Authenticated.\n"
-                                    break 2
-                                else
-                                    printf " [!] File: auth_header.txt was not found or is empty.\n"
-                                    continue
-                                fi
-                            elif [[ "$add_choice" =~ ^[sS]$ ]]; then
-                                printf "[INF] skipping option.\n"
-                                break
-                            else
-                                printf "[ERR] wrong option.\n"
-                                continue
-                            fi
-                        done
-                    else
-                        printf "[INF] auth_headers.txt already exists.\n"
-                        local auth_header=$( head -n 1 "$header")
-                        local flags=(-jc -jsl -d 4 -xhr -aff -kf all -automatic-form-fill -H \""$auth_header"\" -known-files all)
-                        flags+=( -field-scope "$domain" -c 15 -p 75 -silent -jsonl -o "$katana_out_json")
-                        printf "[INF] Continuing Authenticated.\n"
-                        break
-                    fi
-                    ;;
-                "Default")
-                    local flags=(-jc -jsl -kf robotstxt -kf sitemapxml -d 3 -c 20 -p 100 -aff -ef css,png,jpg,jpeg,gif,svg,ico,woff,woff2 -silent)
-                    flags+=( -jsonl -o "$katana_out_json")
-                    printf "\n [INF] Going with defaults.\n"
-                    break
-                    ;;
-                *) echo "Invalid choice $REPLY"
-                    continue
-                    ;;
-            esac
-        done
-
-        while true; do
-            printf "\n [!] Please select Confirm to continue\n"
-            read -e -r -p "[OPT] Confirm (c) Select another option (s): " choice
-            if [[ "$choice" =~ ^[cC]$ ]]; then
-                break 2
-            elif [[ "$choice" =~ ^[sS]$ ]]; then
+    local PS3=" [!] Please select an option: "
+    select opt in "${options[@]}"; do
+        case $opt in
+            "Fast Crawl (breadth-first, unauthenticated)")                
+                flags=(-jc -jsl -kf robotstxt -kf sitemapxml -d 3 -c 20 -p 100 -aff -ef css,png,jpg,jpeg,gif,svg,ico,woff,woff2 -silent)
+                flags+=( -jsonl -o "$katana_out_json")
+                printf "\n[INF] You choose: Fast Endpoint Discovery (Breadth)\n"
+                break 
+                ;;
+            "Deep JS Analysis (authenticated if available)")
+                if [[ "$auth_available" == true ]]; then    
+                    local auth_header=$(head -n 1 "$header")
+                    flags=(-jc -jsl -xhr -aff -d 5 -js-crawl -automatic-form-fill -form-extraction -field-scope "$domain")
+                    flags+=( -c 10 -p 50 -H \""$auth_header"\" -silent -jsonl -o "$katana_out_json")
+                else
+                    printf "[WRN] Running unauthenticated, results may be limited.\n"
+                    flags=(-jc -jsl -xhr -aff -d 5 -js-crawl -automatic-form-fill -form-extraction -field-scope "$domain" -c 10 -p 50)
+                    flags+=( -silent -jsonl -o "$katana_out_json")
+                fi
                 break
-            else
-                continue
-            fi
-        done
+                ;;
+            "Session-Based Crawl (requires auth)")
+                if [[ "$auth_available" == false ]]; then
+                    printf "[ERR] This mode requires auth_header.txt. Place it in %s and re-run.\n" "$domain"
+                    continue
+                fi
+                local auth_header=$( head -n 1 "$header")
+                flags=(-jc -jsl -d 4 -xhr -aff -kf all -automatic-form-fill -H \""$auth_header"\" -known-files all)
+                flags+=( -field-scope "$domain" -c 15 -p 75 -silent -jsonl -o "$katana_out_json")
+                break
+                ;;
+            "Skip")
+                printf "\n [INF] Skipping Katana.\n"
+                return 0
+                ;;
+            *) echo "Invalid choice $REPLY"
+               continue
+               ;;
+        esac
     done
 
-    printf "\n[INF] Katana will run with the following configuration:\n"
-    printf " [+] Flags: %s\n" "${flags[*]}"
+    if [[ ${#flags[@]} -eq 0 ]]; then
+        printf "[WRN] No scan configuration selected. Skipping Katana.\n"
+        return 0
+    fi
 
     printf "\n###############################################################\n"
     printf "#####################   Starting Katana   #####################\n"
     printf "###############################################################\n"
 
-    cat "$httpx_sorted" | katana "${flags[@]}" &> /dev/null
+    katana "${flags[@]}" < "$httpx_sorted" &> /dev/null
 
     if [[ $? -eq 0 && -s "$katana_out_json" ]]; then
-    local total=$(jq -s 'length' "$katana_out_json")
-    local js=$(jq -s '[.[] | select(.request.endpoint | test("\\.js$|\\.mjs$"; "i"))] | length' "$katana_out_json")
-    local params_urls=$(jq -s '[.[] | select(.request.endpoint | contains("?"))] | length' "$katana_out_json")
-    local params_percent=$(awk "BEGIN {if ($total > 0) printf \"%.1f\", ($params_urls / $total) * 100; else print \"0.0\"}")
-    local ext=$(jq -rs '[.[] | .request.endpoint | split("?")[0]] | .[]' "$katana_out_json" | grep -oE '\.[a-zA-Z0-9]+$' | awk 'NF {a[$0]++} END {for (i in a) print a[i], i}' | sort -nr | head -3 | awk '{printf ".%s (%s), ", $2, $1}' | sed 's/, $//')
-    local samples=$(jq -rs '.[] | .request.endpoint' "$katana_out_json" | grep -E '\?|/admin|/api/|/debug|/config|/backup|token=|key=|pass=|secret=|id=' | head -3 | sed 's/^/  - /')
+        local total=$(jq -s 'length' "$katana_out_json" 2>/dev/null)
+        local js=$(jq -s '[.[] | select(.request.endpoint | test("\\.js$|\\.mjs$"; "i"))] | length' "$katana_out_json" 2>/dev/null)
+        local params_urls=$(jq -s '[.[] | select(.request.endpoint | contains("?"))] | length' "$katana_out_json" 2>/dev/null)
+        local params_percent=$(awk "BEGIN {if ($total > 0) printf \"%.1f\", ($params_urls / $total) * 100; else print \"0.0\"}" 2>/dev/null)
+        local ext=$(jq -rs '[.[] | .request.endpoint | split("?")[0]] | .[]' "$katana_out_json" | grep -oE '\.[a-zA-Z0-9]+$' | awk 'NF {a[$0]++} END {for (i in a) print a[i], i}' 2>/dev/null | sort -nr | head -3 | awk '{printf ".%s (%s), ", $2, $1}' | sed 's/, $//')
+        local samples=$(jq -rs '.[] | .request.endpoint' "$katana_out_json" 2>/dev/null | grep -E '\?|/admin|/api/|/debug|/config|/backup|token=|key=|pass=|secret=|id=' | head -3 | sed 's/^/  - /')
 
         printf "[INF] Katana done.\n"
         printf "[+] Total endpoints     : %s\n" "$total"
@@ -725,7 +621,7 @@ run_katana() {
     fi
 
     # Clean output for httpx later
-    jq -r '.request.endpoint' "$katana_out_json" > "$katana_out"
+    jq -r '.request.endpoint' "$katana_out_json" 2>/dev/null > "$katana_out"
 }
 
 rerun_httpx() {
@@ -735,15 +631,13 @@ rerun_httpx() {
 
     # Clean, combine, and sort URLFinder + Katana output. Unless they exists, then just combine.
     if [[ ! -f "$urlfinder_out" ]] || [[ ! -s "$urlfinder_out" ]]; then
-        jq -r '.url' "$urlfinder_out_json" > "$urlfinder_out"
+        jq -r '.url' "$urlfinder_out_json" 2>/dev/null > "$urlfinder_out"
     fi
-
     if [[ ! -f "$katana_out" ]] || [[ ! -s "$katana_out" ]]; then
-        jq -r '.request.endpoint' "$katana_out_json" > "$katana_out"
+        jq -r '.request.endpoint' "$katana_out_json" 2>/dev/null > "$katana_out"
     fi
-
     if [[ -f "$urlfinder_out" ]] && [[ -f "$katana_out" ]]; then
-        cat "$urlfinder_out" "$katana_out" | sort -u > "$httpx_final_in"
+        cat "$urlfinder_out" "$katana_out" | sort -u 2>/dev/null > "$httpx_final_in"
     fi
 
     printf "\n[INF] Setting up httpX\n"
@@ -771,10 +665,10 @@ rerun_httpx() {
     printf "#####################   Starting HttpX    #####################\n"
     printf "###############################################################\n"
 
-   cat "$httpx_final_in" | httpx "${flags[@]}" &> /dev/null
+    httpx "${flags[@]}" < "$httpx_final_in" &> /dev/null
 
     if [[ $? -eq 0 && -s "$httpx_2ndrun_out_json" ]]; then
-    local total=$(jq -s 'length' "$httpx_2ndrun_out_json")
+    local total=$(jq -s 'length' "$httpx_2ndrun_out_json" 2>/dev/null)
     local success=$(jq -s '[.[] | select(.status_code == 200)] | length' "$httpx_2ndrun_out_json" 2>/dev/null || echo "0")
     local titles=$(jq -s '[.[] | select(.title != null and .title != "")] | length' "$httpx_2ndrun_out_json" 2>/dev/null || echo "0")
     local top_codes=$(jq -sr 'group_by(.status_code) | map({code: .[0].status_code, count: length}) | sort_by(-.count)[0:3] | map("\(.code) (\(.count))") | join(", ")' "$httpx_2ndrun_out_json" 2>/dev/null || echo "N/A")
