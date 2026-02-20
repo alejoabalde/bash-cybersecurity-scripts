@@ -36,11 +36,9 @@ install_script_tools() {
     local missing_tools=()
 
     inf "Checking if required tools are installed..."
-    #printf "\n[INF] Checking if required tools are installed...\n"
 
     for tool in "${pd_tools[@]}"; do
         command -v "$tool" &> /dev/null && inf "$tool is already installed." || missing_tools+=("$tool")
-        #command -v "$tool" &> /dev/null && printf "[INF] %s is already installed.\n" "$tool" || missing_tools+=("$tool")
     done
 
     [[ ${#missing_tools[@]} -eq 0 ]] && return 0
@@ -48,10 +46,8 @@ install_script_tools() {
     
     if [[ $? -eq 0 ]]; then
         inf "All required tools were installed."
-#        printf "\n[INF] All required tools were installed.\n"
     else
         err "Failed to install required tools."
-#        printf "[ERR] Failed to install required tools.\n\n"
         return 1
     fi
 }
@@ -63,10 +59,8 @@ define_variables() {
             read -e -r -p "[!] Please specify a domain: " domain
             if [[ -z "$domain" ]]; then
                 err "Domain cannot be empty."    
-                #printf "[ERR] Domain cannot be empty.\n"
             elif [[ ! "$domain" =~ ^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
                 err "Invalid domain syntax. Please enter a valid domain."
-                #printf "[ERR] Invalid domain syntax. Please enter a valid domain.\n"
             else
                 break
             fi
@@ -74,11 +68,9 @@ define_variables() {
     else
         if [[ ! "$domain" =~ ^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
             err "Invalid domain provided via -d flag: $domain" >&2
-            #printf "[ERR] Invalid domain provided via -d flag: %s\n" "$domain" >&2
             exit 1
         fi
         inf "Using domain: $domain."
-        #printf "[INF] Using domain: %s\n" "$domain"
     fi
     
     local strip_protocol="${domain#*://}"
@@ -94,17 +86,14 @@ define_variables() {
     
     if [[ "$output_dir" == *..* ]]; then
         err "Output directory path must not contain '..': $output_dir" >&2
-        #printf "[ERR] Output directory path must not contain '..': %s\n" "$output_dir" >&2
     exit 1
     fi
 
     if [[ ! -d "$output_dir" ]]; then
         mkdir -p "./$output_dir"
         inf "Created directory: $output_dir"
-        #printf "[INF] Created directory: $output_dir.\n"
     else
         inf "Using existing directory: $output_dir"
-        #printf "[INF] Using existing directory: $output_dir.\n"
     fi
 
     for tool in "${pd_tools[@]}"; do
@@ -125,20 +114,17 @@ check_before_run() {
 
     if [[ -f "$tool_out" && -s "$tool_out" ]]; then
         wrn "$tool_name output already exists. File: $tool_out"
-        #echo -e "\n[WRN] $tool_name output already exists. File: $tool_out"
         read -e -r -p "[OPT] Skip $tool_name (s), Overwrite File (o), or Backup File (b)? [S/o/b]: " choice
         
         case "$choice" in
             [sS]*)
-                inf "Skippint $tool_name step."
+                inf "Skipping $tool_name step."
                 printf "\n"
-                #printf "[INF] Skipping $tool_name step.\n"
                 return 1
                 ;;
             [oO]*)
                 inf "Overwriting existing file..."
                 printf "\n"
-                #printf "[INF] Overwriting existing file...\n"
                 return 0
                 ;;
             [bB]*)
@@ -147,12 +133,10 @@ check_before_run() {
                 mv "$tool_out" "$backup_file"
                 inf "Moved existing results to: $backup_file"
                 printf "\n"
-                #printf "[INF] Moved existing results to: %s\n" "$backup_file"
                 return 0
                 ;;
             *) 
                 err "Invalid option. Skipping $tool_name step."
-                #printf "[ERR] Invalid option. Skipping %s step.\n" "$tool_name"
                 return 1 
                 ;;
         esac
@@ -169,10 +153,6 @@ run_subfinder() {
     fin "Discover subdomains for a given target domain."
     inf "This tool will run a passive scan."
     inf "It is recommended to add API keys to: $config_file"
-    #printf "\n[INF] Setting up Subfinder.\n"
-    #printf " [+] Discover subdomains for a given target domain.\n"
-    #printf "\n[INF] This tool will run a passive scan.\n"
-    #printf "[INF] It is recommended to add API keys to: %s\n" "$config_file"
     
     read -e -r -p "[OPT] Open config file in editor before running? [y/N]: " choice
     if [[ "$choice" =~ ^[yY]$ ]]; then
@@ -188,10 +168,8 @@ run_subfinder() {
     if [[ $? -eq 0 && -s "$subfinder_out" ]]; then
         local findings=$(wc -l <"$subfinder_out")
         inf "Subfinder done - $findings subdomains saved."
-        #printf "[INF] Subfinder done - $findings subdomains saved.\n"
     else
         wrn "Subfinder completed, but no information was returned."
-        #printf "[WRN] Subfinder completed, but no information was returned."
         return 0
     fi
 }
@@ -205,9 +183,6 @@ run_shuffledns() {
     inf "Setting up ShuffleDNS."
     fin "Brute-force subdomains that may not be found through passive enumeration."
     wrn "This tool runs an ACTIVE and NOISY scan."
-    #printf "\n[INF] Setting up ShuffleDNS\n"
-    #printf " [+] Brute-force subdomains that may not be found through passive enumeration.\n"
-    #printf "[WRN] This tool runs a ACTIVE and NOISY scan."
 
     inf "ShuffleDNS requires a wordlist and a public DNS resolver list for best results."
     fin " Recommended sources:"
@@ -217,32 +192,21 @@ run_shuffledns() {
     bang "Download one and save it as resolvers.txt in your working directory."
     bang "Download one and save it as wordlist.txt in your working directory."
     bang "Please select Confirm to continue"
-    #printf "[INF] Shuffledns requires a list with public DNS resolvers and a bruteforcing wordlists for best results.\n"
-    #printf "      \n%s\n" "Recommended sources:"
-    #printf "   %s\n" "- Trickest  (Resolvers):  https://github.com/trickest/resolvers/blob/main/resolvers.txt"
-    #printf "   %s\n" "- SecLists  (Wordlists):  https://github.com/danielmiessler/SecLists"
-    #printf "   %s\n" "- AssetNote (Wordlists):  https://wordlists.assetnote.io"
-    #printf "\n[!] Download one and save it as resolvers.txt in your working directory.\n"
-    #printf "[!] Download one and save it as wordlist.txt in your working directory.\n\n"
-    #printf "[!] Please select Confirm to continue\n"
     
     while true; do
         read -e -r -p "[OPT] Confirm (c) Skip step (s): " add_choice
             if [[ "$add_choice" =~ ^[cC]$ ]]; then
                 if [[ ! -f "$wordlist" || ! -f "$resolvers" ]]; then
                     err "Missing files! Ensure both wordlist.txt and resolvers.txt exist."
-                    #printf "[ERR] Missing files! Ensure both wordlist.txt and resolvers.txt exist.\n"
                     continue
                 else
                     break
                 fi
             elif [[ "$add_choice" =~ ^[sS]$ ]]; then
                 inf "Skipping step."
-                #printf "[INF] Skipping step.\n"
                 return 1
             else
                 err "Wrong option."
-                #printf "[ERR] Wrong option.\n"
                 continue
             fi
     done
@@ -255,10 +219,8 @@ run_shuffledns() {
     if [[ $? -eq 0 && -s "$shuffledns_out" ]]; then
         local findings=$(wc -l < "$shuffledns_out")
         ok "ShuffleDNS done - $findings subdomains saved."
-        #printf "\n[INF] ShuffleDNS done - $findings subdomains saved.\n"
     else
         wrn "ShuffleDNS completed, but no information was returned."
-        #printf "[WRN] ShuffleDNS completed, but no information was returned."
         return 0
     fi
 }
@@ -272,7 +234,6 @@ run_alterx() {
     inf "Setting up AlterX."
     fin "Generate permutations of subdomains to identify additional assets."
 
-    #printf "\n[INF] Setting up AlterX\n"
 
     # Sort by uniqueness into a single file
     if [[ -s "$subfinder_out" && -s "$shuffledns_out" ]]; then
@@ -280,15 +241,12 @@ run_alterx() {
         file_input="${output_dir}/sorted_subfinder_shuffledns.txt"
     elif [[ -s "$subfinder_out" ]]; then
         wrn "ShuffleDNS results missing. Using Subfinder output only."
-        #printf "[WRN] ShuffleDNS results missing. Using Subfinder output only.\n"
         file_input="$subfinder_out"
     elif [[ -s "$shuffledns_out" ]]; then
         wrn "Subfinder results missing. Using ShuffleDNS output only."
-        #printf "[WRN] Subfinder results missing. Using ShuffleDNS output only.\n"
         file_input="$shuffledns_out"
     else
         err "No input files found for AlterX! Skipping."
-        #printf "[ERR] No input files found for AlterX! Skipping.\n"
         return 1
     fi
 
@@ -296,16 +254,12 @@ run_alterx() {
     inf "It is recommended to add target-specific keywords to enhance results."
     inf "Examples: company products, acronyms, brands, language-specific terms."
     bang "Do you wish to add any?"
-    #printf "[INF] It is recommended to add target specific keywords to enhance results.\n"
-    #printf "[INF] : company products, acronyms, brands, language specific terms\n"
-    #printf "[!] Do you wish to add any?\n"
     
     while true; do
     read -e -r -p "[OPT] Add now (a) Skip action (s): " add_choice
     if [[ "$add_choice" =~ ^[aA]$ ]]; then
         while true; do
             bang "Create a file named target-keywords.txt containing a keyword per line."
-            #printf "[!] create a file named target-keywords.txt containing a keyword per line.\n"
             read -e -r -p "[OPT] Continue (c) or Skip action (s): " loop_choice
             if [[ "$loop_choice" =~ ^[cC]$ ]]; then
                 if [[ -s "$keywords_file" ]]; then
@@ -313,26 +267,21 @@ run_alterx() {
                     break
                 else
                     err "File target-keywords.txt not found or empty."
-                    #printf "[ERR] File target-keywords.txt not found or empty.\n"
                 fi
             elif [[ "$loop_choice" =~ ^[sS]$ ]]; then
                 inf "Skipping action."
-                #printf "[INF] Skipping action.\n"
                 break
             else
                 err "Wrong option."
-                #printf "[ERR] Wrong option.\n"
                 continue
             fi
         done
         break
     elif [[ "$add_choice" =~ ^[sS]$ ]]; then
         inf "Skipping action."
-        #printf "[INF] Skipping action.\n"
         break
     else
         err "Wrong option."
-        #printf "[ERR] Wrong option.\n"
         continue
     fi
     done
@@ -340,17 +289,14 @@ run_alterx() {
     printf "\n┌─────────────────────────────────────────────────────────────────────────────────┐\n"
     printf "                                 Starting AlterX                                 \n"
     printf "└─────────────────────────────────────────────────────────────────────────────────┘\n"
-    #printf "\n [+] Generate permutations of subdomains to identify additional assets\n"
 
     alterx "${alterx_flags[@]}" < "$file_input" &> /dev/null
     
     if [[ $? -eq 0 ]]; then
         local findings=$(wc -l < "$alterx_out")
         ok "AlterX done - $findings permutations saved."
-        #printf "\n[INF] AlterX done - $findings permutations saved.\n"
     else
         wrn "AlterX completed, but no information was returned."
-        #printf "[WRN] AlterX completed, but no information was returned.\n"
         return 0
     fi
 
@@ -369,24 +315,18 @@ run_dnsx() {
     fin "Verify which subdomains resolve to valid hosts."
     wrn "This is an ACTIVE and NOISY step."
     bang "Select Confirm to start."
-    #printf "\n [+] Verify which subdomains resolve to valid hosts.\n"
-    #printf "[INF] This an ACTIVE and NOISY step.\n"
-    #printf "[!] Select Confirm to start.\n"
     
     while true; do
     read -e -r -p "[OPT] Confirm (c) Skip step (s): " choice
         if [[ "$choice" =~ ^[cC]$ ]]; then
             printf "\n"
             inf "Starting dnsx. This will take a while."
-            #printf "\n[INF] Starting dnsx. This will take a while.\n"
             break
         elif [[ "$choice" =~ ^[sS]$ ]]; then
             inf "Skipping dnsx."
-            #printf "[INF] Skipping dnsx.\n\n"
             return 0
         else
             err "Wrong option."
-            #printf "[ERR] Wrong option.\n"
             continue
         fi
     done
@@ -405,13 +345,9 @@ run_dnsx() {
         fin "$resolved_a_aaaa with A/AAAA records."
         fin "$resolved_cname with CNAME (potential takeovers?)"
         fin "Sample: "
-        #printf "[INF] dnsx done - %s resolved hosts.\n" "$resolved_hosts"
-        #printf " [+] %s with A/AAAA records.\n" "$resolved_a_aaaa"
-        #printf " [+] %s with CNAME (potential takeovers?)\n" "$resolved_cname"
         printf "%s\n" "$resolved_sample"
     else
         wrn "dnsx completed, but no information was returned."
-        #printf "[WRN] dnsx completed, but no information was returned.\n"
         return 0
     fi
 
@@ -431,24 +367,18 @@ run_naabu() {
     fin "Identify open ports on resolved hosts to find additional applications."
     wrn "This is an ACTIVE and NOISY step."
     bang "Select Confirm to start."
-    #printf "\n [+] Identify open ports on resolved hosts to find additional applications.\n"
-    #printf "[INF] This an ACTIVE and NOISY step.\n"
-    #printf "[!] Select Confirm to start.\n"
     
     while true; do
     read -e -r -p "[OPT] Confirm (c) Skip step (s): " choice
         if [[ "$choice" =~ ^[cC]$ ]]; then
             printf "\n"
             inf "Starting naabu. This will take a while."
-            #printf "\n[INF] Starting naabu. This will take a while.\n"
             break
         elif [[ "$choice" =~ ^[sS]$ ]]; then
             inf "Skipping Naabu."
-            #printf "[INF] Skipping Naabu.\n\n"
             return 1
         else
             err "Wrong option."
-            #printf "[ERR] Wrong option.\n"
             continue
         fi
     done
@@ -468,14 +398,8 @@ run_naabu() {
         fin "Top Ports: ${top%, }"
         printf "\n"
 
-        #printf "[INF] Naabu done.\n"
-        #printf " [+] Hosts Processed: %s hosts\n" "$hosts"
-        #printf " [+] Open Ports: %s\n" "$ports"
-        #printf " [+] Unique Services: %s\n" "$unique"
-        #printf " [+] Top Ports: %s\n" "${top%, }"
     else
         wrn "Naabu completed, but no information was returned."
-        #printf "[WRN] Naabu completed, but no information was returned.\n"
         return 0
     fi
 
@@ -492,9 +416,6 @@ run_httpx() {
     fin "Gather metadata about hosts and ports."
     wrn "This tool runs an ACTIVE and NOISY scan."
     printf "\n"
-    #printf "\n[INF] Setting up httpX\n"
-    #printf " [+] Gather metadata about hosts and ports.\n"
-    #printf "\n[WRN] This tool runs a ACTIVE and NOISY scan.\n"
    
     local PS3="[!] Select the option that fits you best: "
     while true; do
@@ -505,14 +426,12 @@ run_httpx() {
                     flags+=( -json -o "$httpx_out_json")
                     printf "\n"
                     inf "You chose: Quick Discovery (Fast Triage)"
-                    #printf "\n[INF] You choose: Quick Discovery (Fast Triage)\n"
                     break
                     ;;
                 "Technology Fingerprinting")
                     local flags=(-silent -status-code -title -tech-detect -server -content-type -follow-redirects -json -o "$httpx_out_json")
                     printf "\n"
                     inf "You chose: Technology Fingerprinting"
-                    #printf "\n[INF] You choose: Technology Fingerprinting\n"
                     break
                     ;;
                 "Deep Enumeration (Comprehensive)")
@@ -520,14 +439,12 @@ run_httpx() {
                     flags+=( -follow-redirects -response-time -json -threads 50 -rate-limit 150 -o "$httpx_out_json")
                     printf "\n"
                     inf "You chose: Deep Enumeration (Comprehensive)"
-                    #printf "\n[INF] You choose: Deep Enumeration (Comprehensive)\n"
                     break
                     ;;
                 "Screenshot & Hash (Visual Analysis)")
                     local flags=(-silent -status-code -title -screenshot -favicon -hash md5 -follow-redirects -json -o "$httpx_out_json")
                     printf "\n"
                     inf "You chose: Screenshot & Hash (Visual Analysis)"
-                    #printf "\n[INF] You choose: Screenshot & Hash (Visual Analysis)\n"
                     break
                     ;;
                 "Custom Headers & Paths (Attack Surface)")
@@ -535,7 +452,6 @@ run_httpx() {
                     flags+=( -mc 200,403,401,500 -json -o "$httpx_out_json")
                     printf "\n"
                     inf "You chose: Custom Headers & Paths (Attack Surface)"
-                    #printf "\n[INF] You choose: Custom Headers & Paths (Attack Surface)\n"
                     break
                     ;;
                 "Stealth Mode (Low Noise)")
@@ -543,7 +459,6 @@ run_httpx() {
                     flags+=( -silent -json -o "$httpx_out_json")
                     printf "\n"
                     inf "You chose: Stealth Mode (Low Noise)"
-                    #printf "\n[INF] You choose: Stealth Mode (Low Noise)\n"
                     break
                     ;;
                 "Too Much Options (go for Default)")
@@ -552,7 +467,6 @@ run_httpx() {
                     flags+=(-threads 25 -rate-limit 100 -json -o "$httpx_out_json")
                     printf "\n"
                     inf "You chose: Too Much Options (go for Default)"
-                    #printf "\n[INF] You choose: Information overload (Going for defaults)\n"
                     break
                     ;;
                 *) echo "Invalid choice $REPLY"
@@ -561,7 +475,6 @@ run_httpx() {
             esac
         done    
         bang "Please select Confirm to continue"
-        #printf "\n [!] Please select Confirm to continue\n"
         read -e -r -p "[OPT] Confirm (c) Select another option (s): " choice
         if [[ "$choice" =~ ^[cC]$ ]]; then
             break
@@ -587,14 +500,8 @@ run_httpx() {
     fin "Success (200)      : $success"
     fin "Pages with Titles  : $titles"
     fin "Top Status Codes   : $top_codes"
-    #printf "[INF] HttpX done.\n"
-    #printf " [+] URLs Processed     : %s\n"  "$total"
-    #printf " [+] Success (200)      : %s\n" "$success"
-    #printf " [+] Pages with Titles  : %s\n" "$titles"
-    #printf " [+] Top Status Codes   : %s\n" "$top_codes"
     else
         wrn "HttpX completed, but no information was returned."
-        #printf "[WRN] HttpX Completed, but no information was returned.\n"
         return 0
     fi
 
@@ -610,9 +517,6 @@ run_urlfinder() {
     inf "Setting up URLFinder."
     fin "Simplify and accelerate web asset discovery."
     inf "This tool will run a passive scan."
-    #printf "\n[INF] Setting up URLFinder.\n"
-    #printf " [+] Simplify and accelerate web asset discovery.\n"
-    #printf "\n[INF] This tool will run a passive scan.\n"
     
     printf "\n┌─────────────────────────────────────────────────────────────────────────────────┐\n"
     printf "                                Starting URLFinder                               \n"
@@ -629,13 +533,8 @@ run_urlfinder() {
     fin "JavaScript Files   : $js"
     fin "URLs with Params   : $params"
     fin "Interesting Files  : $interesting"
-    #printf "[INF] URLFinder done.\n"
-    #printf " [+] JavaScript Files   : %s\n" "$js"
-    #printf " [+] URLs with Params   : %s\n" "$params"
-    #printf " [+] Interesting Files  : %s\n" "$interesting"
     else
         wrn "URLFinder completed, but no information was returned."
-        #printf "[WRN] URLFinder completed, but no information was returned.\n"
         return 0
     fi
 
@@ -655,16 +554,12 @@ run_katana() {
     inf "Setting up Katana."
     fin "Crawl websites to discover endpoints, JavaScript files, and other content."
     wrn "This tool runs an ACTIVE and NOISY scan."
-    #printf "\n[INF] Setting up Katana.\n"
-    #printf " [+] Crawl websites to discover endpoints, JavaScript files, and other content.\n"
-    #printf "\n[WRN] This tool runs a ACTIVE and NOISY scan.\n"
 
     if [[ -f "$header" && -s "$header" ]]; then
         auth_header=$(head -n 1 "$header")
         auth_available=true
         inf "Auth header found, authenticated modes available."
         printf "\n"
-        #printf "[INF] Auth header found, authenticated modes available.\n"
     else
         wrn "No auth header found. To enable authenticated modes:"
         inf "  1. Log into the target and copy your session/auth header"
@@ -672,11 +567,6 @@ run_katana() {
         inf "  3. Re-run this step"
         inf "  Continuing with unauthenticated modes only."
         printf "\n"
-        #printf "[WRN] No auth header found. To enable authenticated modes:\n"
-        #printf "  1. Log into the target and copy your session/auth header\n"
-        #printf "  2. Save it as a single line in: %s\n" "$header"
-        #printf "  3. Re-run this step\n"
-        #printf "  Continuing with unauthenticated modes only.\n"
     fi
 
     local PS3="[!] Please select an option: "
@@ -687,7 +577,6 @@ run_katana() {
                 flags+=( -jsonl -o "$katana_out_json")
                 printf "\n"
                 inf "You chose: Fast Endpoint Discovery (Breadth)"
-                #printf "\n[INF] You choose: Fast Endpoint Discovery (Breadth)\n"
                 break 
                 ;;
             "Deep JS Analysis (authenticated if available)")
@@ -702,7 +591,6 @@ run_katana() {
                     printf "\n"
                     inf "You chose: Deep JS Analysis"
                     wrn "Running unauthenticated, results may be limited."
-                    #printf "[WRN] Running unauthenticated, results may be limited.\n"
                     flags=(-jc -jsl -xhr -aff -d 5 -js-crawl -automatic-form-fill -form-extraction -field-scope "$domain" -c 10 -p 50)
                     flags+=( -silent -jsonl -o "$katana_out_json")
                 fi
@@ -711,7 +599,6 @@ run_katana() {
             "Session-Based Crawl (requires auth)")
                 if [[ "$auth_available" == false ]]; then
                     err "This mode requires auth_header.txt. Place it in $output_dir and re-run."
-                    #printf "[ERR] This mode requires auth_header.txt. Place it in %s and re-run.\n" "$output_dir"
                     continue
                 fi
                 printf "\n"
@@ -723,7 +610,6 @@ run_katana() {
                 ;;
             "Skip")
                 inf "Skipping Katana."
-                #printf "\n [INF] Skipping Katana.\n"
                 return 0
                 ;;
             *) echo "Invalid choice $REPLY"
@@ -734,7 +620,6 @@ run_katana() {
 
     if [[ ${#flags[@]} -eq 0 ]]; then
         wrn "No scan configuration selected. Skipping Katana."
-        #printf "[WRN] No scan configuration selected. Skipping Katana.\n"
         return 0
     fi
 
@@ -760,16 +645,9 @@ run_katana() {
         fin "Sample: "
         printf "${samples:-  - (none found)}"
         printf "\n"
-        #printf "[INF] Katana done.\n"
-        #printf "[+] Total endpoints     : %s\n" "$total"
-        #printf "[+] JavaScript Files    : %s\n" "$js"
-        #printf "[+] URLs with Params    : %s (%s%%)\n" "$params_urls" "$params_percent"
-        #printf "[+] Interesting extensions (top 3): %s\n" "${ext:-none}"
-        #printf "[+] Sample:\n%s\n" "${samples:-  - (none found)}"
     else
         wrn "Katana completed, but no information was returned."
         printf "\n"
-        #printf "[WRN] Katana Completed, but no information was returned.\n"
         return 0
     fi
 
@@ -800,11 +678,6 @@ rerun_httpx() {
     fin "httpX will run once again to filter out dead URLs and present cleaner, actionable data."
     fin "httpX flags will be set up to be more conservative this time."
     bang "Please select Confirm to continue"
-    #printf "\n[INF] Setting up httpX\n"
-    #printf " [+] httpX will run once again to filter out any dead URLs and present cleaner and actionable data.\n"
-    #printf " [+] httpX flags will be set up to be more conservative this time.\n"
-    #printf "\n[WRN] This tool will run an ACTIVE and NOISY scan.\n"
-    #printf " [!] Please select Confirm to continue\n"
 
 
     while true; do
@@ -813,11 +686,9 @@ rerun_httpx() {
             break
         elif [[ "$choice" =~ ^[sS]$ ]]; then
             inf "Skipping httpX."
-            #printf "[INF] Skipping Httpx.\n\n"
             return 0
         else
             err "Wrong option."
-            #printf "[ERR] Wrong option.\n"
             continue
         fi
     done
@@ -839,14 +710,8 @@ rerun_httpx() {
     fin "Success (200)      : $success"
     fin "Pages with Titles  : $titles"
     fin "Top Status Codes   : $top_codes"
-    #printf "[INF] HttpX done.\n"
-    #printf " [+] URLs Processed     : %s\n"  "$total"
-    #printf " [+] Success (200)      : %s\n" "$success"
-    #printf " [+] Pages with Titles  : %s\n" "$titles"
-    #printf " [+] Top Status Codes   : %s\n" "$top_codes"
     else
         wrn "HttpX completed, but no information was returned."
-        #printf "[WRN] HttpX Completed, but no information was returned.\n"
         return 0
     fi
 } 
@@ -856,7 +721,6 @@ generate_report() {
     local scan_date=$(date "+%Y-%m-%d %H:%M")
 
     inf "Generating final report."
-    #printf "\n[INF] Generating final report.\n"
 
     cat << EOF > "$report_file"
 # Recon Report - $domain
@@ -924,8 +788,6 @@ EOF
 
     ok "Report generated: $report_file"
     ok "Full scan completed successfully!"
-    #printf "[INF] Report generated: %s\n" "$report_file"
-    #printf "[INF] Full scan completed successfully!\n"
 }
 
 print_logo() {
@@ -1023,7 +885,6 @@ printf "\n┌──────────────────────�
 printf "                             Phase 1: Asset Discovery                            \n"
 printf "└─────────────────────────────────────────────────────────────────────────────────┘\n"
 fin "Enumerating subdomains, hosts, and open ports..."
-#printf " [+] Enumerating subdomains, hosts, and open ports...\n"
 
 # Perform a check before running Subfinder and continue, otherwise skip it.
 if check_before_run subfinder "$subfinder_out"; then
@@ -1064,7 +925,6 @@ printf "                            Phase 2: Content Discovery                  
 printf "└─────────────────────────────────────────────────────────────────────────────────┘\n"
 fin "Gather actionable data from identified assets."
 printf "\n"
-#printf "[+] Gather actionable data from identified assets.\n"
 
 # Configure and run URLFinder
 if check_before_run urlfinder "$urlfinder_out_json"; then
