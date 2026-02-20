@@ -86,9 +86,9 @@ TODO: Implement '-c defaults' for non-interactive
 ![TangoRecon running](screenshots/terminal-run.png)
 
 **Final Report generated:**
-![Report example1](screenshots/report1.png)
-![Report example2](screenshots/report2.png)
-![Report example3](screenshots/report3.png)
+![Report example1](screenshots/report_1.png)
+![Report example2](screenshots/report_2.png)
+![Report example3](screenshots/report_3.png)
 
 ## Legal & Ethical Use
 
