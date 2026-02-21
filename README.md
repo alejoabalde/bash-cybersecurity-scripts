@@ -67,10 +67,6 @@ chmod +x TangoRecon
 ./TangoRecon -d example.com
 ./TangoRecon -d example.com -o my-recon-output
 ```
-```bash
-TODO: Implement '-c defaults' for non-interactive
-./TangoRecon -d example.com -o my-recon-output -c defaults
-```
 
 ### Full help
 
