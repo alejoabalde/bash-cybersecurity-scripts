@@ -42,7 +42,7 @@ All installed via **PDTM** (ProjectDiscovery Tool Manager)
 ## Installation
 
 ```bash
-git clone https://github.com/alejoabalde/bash-cybersecurity-scripts.git
+git clone https://github.com/alejoabalde/TangoRecon.git
 cd bash-cybersecurity-scripts
 chmod +x TangoRecon
 ```
