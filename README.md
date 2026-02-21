@@ -1,6 +1,3 @@
-# Bash Cybersecurity Scripts
-Portfolio of Bash scripts for offensive security practice.
-
 # TangoRecon
 
 **TangoRecon** is a custom external reconnaissance automation tool built in Bash.
