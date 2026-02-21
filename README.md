@@ -1,10 +1,7 @@
-# Bash Cybersecurity Scripts
-Portfolio of Bash scripts for offensive security practice.
-
 # TangoRecon
 
 **TangoRecon** is a custom external reconnaissance automation tool built in Bash.
-It chains 8 ProjectDiscovery tools (subfinder,shuffledns, alterx, dnsx, naabu, httpx, urlfinder, and katana) following NahamSec's methodology to gather actionable assets quickly and efficiently.
+It chains 8 ProjectDiscovery tools (subfinder, shuffledns, alterx, dnsx, naabu, httpx, urlfinder, and katana) following NahamSec's methodology to gather actionable assets quickly and efficiently.
 
 The script was created as a hands-on project to practice Bash scripting while building something useful for my bug bounty hunting, and vulnerability research.
 
@@ -16,7 +13,7 @@ The script was created as a hands-on project to practice Bash scripting while bu
 - Color-coded output for better readability
 
 ## Dependencies (must be installed beforehand)
-- massdns (shuffledns, dnsx)
+- massdns (shuffledns)
 - masscan (naabu)
 
 ### Required tools ( they can be installed automatically via `-i tools` if missing)
@@ -32,7 +29,7 @@ The script was created as a hands-on project to practice Bash scripting while bu
 All installed via **PDTM** (ProjectDiscovery Tool Manager)
 
 ### Optional / Recommended
-- `jq` — for structured report generation (highly recommended)
+- `jq` - for structured report generation (highly recommended)
 - A good public DNS resolvers list (https://github.com/trickest/resolvers)
 - A good wordlist for bruteforcing (https://wordlists.assetnote.io)
 - API keys from specialized asset databases to use with subfinder for better passive enumeration.
@@ -45,8 +42,8 @@ All installed via **PDTM** (ProjectDiscovery Tool Manager)
 ## Installation
 
 ```bash
-git clone https://github.com/alejoabalde/bash-cybersecurity-scripts.git
-cd bash-cybersecurity-scripts
+git clone https://github.com/alejoabalde/TangoRecon.git
+cd TangoRecon
 chmod +x TangoRecon
 ```
 
@@ -64,15 +61,9 @@ chmod +x TangoRecon
 ./TangoRecon
 ```
 
-### Non-interactive (recommended for scripting / CI)
-
 ```bash
 ./TangoRecon -d example.com
 ./TangoRecon -d example.com -o my-recon-output
-```
-```bash
-TODO: Implement '-c defaults' for non-interactive
-./TangoRecon -d example.com -o my-recon-output -c defaults
 ```
 
 ### Full help
@@ -92,11 +83,10 @@ TODO: Implement '-c defaults' for non-interactive
 
 ## Legal & Ethical Use
 
-**This tool is for authorized testing only.** Use only on:
+**This tool is for authorized testing only.** It can be used on:
 
 - Bug bounty programs with explicit scope permission
 - Assets you own or have written consent to test
-- Approved internal red team exercises
 
 Unauthorized use is illegal. Always obtain permission first.
 
