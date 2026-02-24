@@ -74,12 +74,14 @@ chmod +x TangoRecon
 
 ## Example Output
 
-![TangoRecon running](screenshots/terminal-run.png)
+![TangoRecon running](screenshots/Terminal_run_1.png)
+![TangoRecon Install](screenshots/Terminal_run_2.png)
 
 **Final Report generated:**
-![Report example1](screenshots/report_1.png)
-![Report example2](screenshots/report_2.png)
-![Report example3](screenshots/report_3.png)
+
+![Report Part 1](screenshots/Report_1.png)
+![Report Part 2](screenshots/Report_2.png)
+![Report Part 3](screenshots/Report_3.png)
 
 ## Legal & Ethical Use
 
@@ -94,6 +96,7 @@ Unauthorized use is illegal. Always obtain permission first.
 
 - Bash scripting (my first major project!)
 - ProjectDiscovery tools (amazing open-source suite)
+- Code reviewed and refined with AI assistance (Claude)
 
 ## Author
 

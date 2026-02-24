@@ -722,49 +722,49 @@ generate_report() {
 
 ---
 ## Executive Summary
-- Total subdomains discovered: $(wc -l < "$subfinder_out" 2>/dev/null || echo 0) (Subfinder) + $(wc -l < "$shuffledns_out" 2>/dev/null || echo 0) (Shuffledns)
-- Total resolved hosts: $(jq -s 'length' "$dnsx_out_json" 2>/dev/null || echo 0)
-- Total alive web assets (final httpx): $(jq -s 'length' "$httpx_2ndrun_out_json" 2>/dev/null || echo 0)
-- Total unique endpoints crawled: $(jq -s 'length' "$katana_out_json" 2>/dev/null || echo 0)
+- Total subdomains discovered: $(wc -l < "$subfinder_out" 2>/dev/null) (Subfinder) + $(wc -l < "$shuffledns_out" 2>/dev/null) (Shuffledns)
+- Total resolved hosts: $(jq -s 'length' "$dnsx_out_json" 2>/dev/null)
+- Total alive web assets (final httpx): $(jq -s 'length' "$httpx_2ndrun_out_json" 2>/dev/null)
+- Total unique endpoints crawled: $(jq -s 'length' "$katana_out_json" 2>/dev/null)
 
 ## 1. Asset Discovery
 ### Subdomains
-- Subfinder: $(wc -l < "$subfinder_out" 2>/dev/null || echo 0)
-- Shuffledns: $(wc -l < "$shuffledns_out" 2>/dev/null || echo 0)
-- AlterX permutations: $(wc -l < "$alterx_sorted" 2>/dev/null || echo 0)
+- Subfinder: $(wc -l < "$subfinder_out" 2>/dev/null)
+- Shuffledns: $(wc -l < "$shuffledns_out" 2>/dev/null)
+- AlterX permutations: $(wc -l < "$alterx_sorted" 2>/dev/null)
 
 ### DNS Resolution (dnsx)
-$(jq -s 'length' "$dnsx_out_json" 2>/dev/null || echo 0) resolved hosts
-- With A/AAAA records: $(jq -c 'select((.a | length > 0) or (.aaaa | length > 0))' "$dnsx_out_json" 2>/dev/null | wc -l || echo 0)
-- With CNAME (potential takeovers): $(jq -c 'select(.cname | length > 0)' "$dnsx_out_json" 2>/dev/null | wc -l || echo 0)
+$(jq -s 'length' "$dnsx_out_json" 2>/dev/null) resolved hosts
+- With A/AAAA records: $(jq -c 'select((.a | length > 0) or (.aaaa | length > 0))' "$dnsx_out_json" 2>/dev/null | wc -l)
+- With CNAME (potential takeovers): $(jq -c 'select(.cname | length > 0)' "$dnsx_out_json" 2>/dev/null | wc -l)
 
 ### Ports (Naabu)
-- Hosts with open ports: $(jq -r '.host' "$naabu_out_json" 2>/dev/null | sort -u | wc -l || echo 0)
-- Unique open ports: $(jq -r '.port' "$naabu_out_json" 2>/dev/null | sort -u | wc -l || echo 0)
+- Hosts with open ports: $(jq -r '.host' "$naabu_out_json" 2>/dev/null | sort -u | wc -l)
+- Unique open ports: $(jq -r '.port' "$naabu_out_json" 2>/dev/null | sort -u | wc -l)
 
 ## 2. Web Content Discovery
 ### First httpx pass
-- Alive URLs: $(jq -s 'length' "$httpx_out_json" 2>/dev/null || echo 0)
+- Alive URLs: $(jq -s 'length' "$httpx_out_json" 2>/dev/null)
 
 ### URLFinder + Katana + Final httpx
-- Combined unique URLs fed to final httpx: $(wc -l < "$httpx_final_in" 2>/dev/null || echo 0)
-- Final alive assets: $(jq -s 'length' "$httpx_2ndrun_out_json" 2>/dev/null || echo 0)
+- Combined unique URLs fed to final httpx: $(wc -l < "$httpx_final_in" 2>/dev/null)
+- Final alive assets: $(jq -s 'length' "$httpx_2ndrun_out_json" 2>/dev/null)
 
 ### Katana Deep Crawl
 $(cat << INNER
-- Total endpoints: $(jq -s 'length' "$katana_out_json" 2>/dev/null || echo 0)
-- JavaScript Files: $(jq -s '[.[] | select(.request.endpoint | test("\\.js$|\\.mjs$"; "i"))] | length' "$katana_out_json" 2>/dev/null || echo 0)
-- URLs with Params: $(jq -s '[.[] | select(.request.endpoint | contains("?"))] | length' "$katana_out_json" 2>/dev/null || echo 0)
-- Interesting extensions (top 3): $(jq -rs '[.[] | .request.endpoint | split("?")[0]] | .[]' "$katana_out_json" 2>/dev/null | grep -oE '\.[a-zA-Z0-9]+$' | awk 'NF {a[$0]++} END {for (i in a) print a[i], i}' | sort -nr | head -3 | awk '{printf ".%s (%s), ", $2, $1}' | sed 's/, $//' || echo "none")
+- Total endpoints: $(jq -s 'length' "$katana_out_json" 2>/dev/null)
+- JavaScript Files: $(jq -s '[.[] | select(.request.endpoint | test("\\.js$|\\.mjs$"; "i"))] | length' "$katana_out_json" 2>/dev/null)
+- URLs with Params: $(jq -s '[.[] | select(.request.endpoint | contains("?"))] | length' "$katana_out_json" 2>/dev/null)
+- Interesting extensions (top 3): $(jq -rs '[.[] | .request.endpoint | split("?")[0]] | .[]' "$katana_out_json" 2>/dev/null | grep -oE '\.[a-zA-Z0-9]+$' | awk 'NF {a[$0]++} END {for (i in a) print a[i], i}' | sort -nr | head -3 | awk '{printf ".%s (%s), ", $2, $1}' | sed 's/, $//')
 INNER
 )
 
 ## 3. High-Value Findings
 **Potential Subdomain Takeovers (CNAMEs):**
-$(jq -r 'select(.cname | length > 0) | "\(.host) → \(.cname[0])"' "$dnsx_out_json" 2>/dev/null | head -10 || echo "None detected")
+$(jq -r 'select(.cname | length > 0) | "\(.host) → \(.cname[0])"' "$dnsx_out_json" 2>/dev/null | head -10)
 
 **High-Interest Endpoints (from Katana + Urlfinder):**
-$(jq -r '.request.endpoint' "$katana_out_json" 2>/dev/null | grep -E '\?|/admin|/api/|/debug|/config|/backup|token=|key=|pass=|secret=' | head -15 || echo "None found")
+$(jq -r '.request.endpoint' "$katana_out_json" 2>/dev/null | grep -E '\?|/admin|/api/|/debug|/config|/backup|token=|key=|pass=|secret=' | head -15)
 
 ## 4. File Locations
 - All raw outputs: $output_dir/
