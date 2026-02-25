@@ -755,7 +755,7 @@ $(cat << INNER
 - Total endpoints: $(jq -s 'length' "$katana_out_json" 2>/dev/null)
 - JavaScript Files: $(jq -s '[.[] | select(.request.endpoint | test("\\.js$|\\.mjs$"; "i"))] | length' "$katana_out_json" 2>/dev/null)
 - URLs with Params: $(jq -s '[.[] | select(.request.endpoint | contains("?"))] | length' "$katana_out_json" 2>/dev/null)
-- Interesting extensions (top 3): $(jq -rs '[.[] | .request.endpoint | split("?")[0]] | .[]' "$katana_out_json" 2>/dev/null | grep -oE '\.[a-zA-Z0-9]+$' | awk 'NF {a[$0]++} END {for (i in a) print a[i], i}' | sort -nr | head -3 | awk '{printf ".%s (%s), ", $2, $1}' | sed 's/, $//')
+- Interesting extensions (top 3): $(jq -rs '[.[] | .request.endpoint | split("?")[0]] | .[]' "$katana_out_json" 2>/dev/null | grep -oE '\.[a-zA-Z0-9]+$' | awk 'NF {a[$0]++} END {for (i in a) print a[i], i}' | sort -nr | head -3 | awk '{printf "%s (%s), ", $2, $1}' | sed 's/, $//')
 INNER
 )
 
